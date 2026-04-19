@@ -1,6 +1,15 @@
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 
+type MatchData = {
+  matchId?: string;
+  player1Id?: string;
+  player2Id?: string;
+  player1Side?: string;
+  player2Side?: string;
+  topicId?: string;
+};
+
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -11,17 +20,21 @@ export async function GET(req: Request) {
     }
 
     const queueData = await redis.hgetall(`queue:user:${userId}`);
-    const matchId = await redis.get(`match:user:${userId}`);
+    const matchId = await redis.get<string | null>(`match:user:${userId}`);
+
+    const isQueued = !!queueData && Object.keys(queueData).length > 0;
 
     if (!matchId) {
       return NextResponse.json({
-        queued: Object.keys(queueData).length > 0,
+        queued: isQueued,
         matchFound: false,
         matchId: null,
       });
     }
 
-    const matchData = await redis.hgetall(`match:${matchId}`);
+    const matchData = (await redis.hgetall(
+      `match:${matchId}`
+    )) as MatchData | null;
 
     if (!matchData || !matchData.matchId) {
       return NextResponse.json({
@@ -45,9 +58,9 @@ export async function GET(req: Request) {
       queued: false,
       matchFound: true,
       matchId,
-      topicId: matchData.topicId,
-      side,
-      opponentId,
+      topicId: matchData.topicId ?? null,
+      side: side ?? null,
+      opponentId: opponentId ?? null,
     });
   } catch (error) {
     console.error("queue/status error", error);

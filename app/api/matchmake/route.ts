@@ -5,13 +5,23 @@ function overlap(a: string[], b: string[]) {
   return a.filter((item) => b.includes(item));
 }
 
+type QueueUserData = {
+  userId: string;
+  rating: string;
+  topicIds: string;
+  joinedAt: string;
+};
+
 export async function POST() {
   try {
     const userIds = await redis.zrange("queue:global", 0, -1);
 
     for (const userId of userIds) {
-      const rawA = await redis.hgetall(`queue:user:${userId}`);
-      if (!rawA.userId) continue;
+      const rawA = (await redis.hgetall(
+        `queue:user:${userId}`
+      )) as QueueUserData | null;
+
+      if (!rawA || !rawA.userId) continue;
 
       const ratingA = Number(rawA.rating);
       const topicsA: string[] = JSON.parse(rawA.topicIds || "[]");
@@ -19,8 +29,11 @@ export async function POST() {
       for (const otherUserId of userIds) {
         if (userId === otherUserId) continue;
 
-        const rawB = await redis.hgetall(`queue:user:${otherUserId}`);
-        if (!rawB.userId) continue;
+        const rawB = (await redis.hgetall(
+          `queue:user:${otherUserId}`
+        )) as QueueUserData | null;
+
+        if (!rawB || !rawB.userId) continue;
 
         const ratingB = Number(rawB.rating);
         const topicsB: string[] = JSON.parse(rawB.topicIds || "[]");
@@ -35,7 +48,8 @@ export async function POST() {
           const player2Side = player1Side === "PRO" ? "CON" : "PRO";
 
           await redis.zrem("queue:global", userId, otherUserId);
-          await redis.del(`queue:user:${userId}`, `queue:user:${otherUserId}`);
+          await redis.del(`queue:user:${userId}`);
+          await redis.del(`queue:user:${otherUserId}`);
 
           await redis.hset(`match:${matchId}`, {
             matchId,

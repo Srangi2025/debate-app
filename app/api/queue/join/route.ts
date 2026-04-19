@@ -21,7 +21,8 @@ export async function POST(req: Request) {
 
     const joinedAt = Date.now();
 
-    await redis.zadd("queue:global", rating, userId);
+    await redis.zadd("queue:global", { score: rating, member: userId });
+
     await redis.hset(`queue:user:${userId}`, {
       userId,
       rating: String(rating),
