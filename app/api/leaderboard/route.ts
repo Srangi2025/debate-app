@@ -1,16 +1,21 @@
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 
+type StringMap = Record<string, string>;
+
 export async function GET() {
   try {
-    const ratings = await redis.hgetall("users:ratings");
-    const usernames = await redis.hgetall("users:usernames");
+    const rawRatings = await redis.hgetall("users:ratings");
+    const rawUsernames = await redis.hgetall("users:usernames");
 
-    const players = Object.entries(ratings ?? {})
+    const ratings = (rawRatings ?? {}) as StringMap;
+    const usernames = (rawUsernames ?? {}) as StringMap;
+
+    const players = Object.entries(ratings)
       .map(([userId, ratingValue]) => ({
         userId,
-        username: (usernames?.[userId] as string) || userId,
-        rating: Number(ratingValue),
+        username: usernames[userId] || userId,
+        rating: Number(ratingValue) || 1000,
       }))
       .sort((a, b) => b.rating - a.rating)
       .map((player, index) => ({
@@ -18,9 +23,7 @@ export async function GET() {
         ...player,
       }));
 
-    return NextResponse.json({
-      players,
-    });
+    return NextResponse.json({ players });
   } catch (error) {
     console.error("leaderboard error", error);
     return NextResponse.json(

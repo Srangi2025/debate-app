@@ -64,6 +64,8 @@ export async function POST() {
             player2Side,
             status: "live",
             createdAt: String(Date.now()),
+            player1Submitted: "false",
+            player2Submitted: "false",
           });
 
           await redis.set(`match:user:${userId}`, matchId);

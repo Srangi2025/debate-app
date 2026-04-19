@@ -51,6 +51,7 @@ export default function MatchPage() {
   const [matchData, setMatchData] = useState<MatchResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [ending, setEnding] = useState(false);
+  const [waitingForOpponent, setWaitingForOpponent] = useState(false);
 
   const [phaseIndex, setPhaseIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(PHASES[0].duration);
@@ -80,6 +81,27 @@ export default function MatchPage() {
   }, [params.id]);
 
   useEffect(() => {
+    if (!waitingForOpponent || !matchData) return;
+
+    const interval = setInterval(async () => {
+      const res = await fetch(`/api/match/${matchData.matchId}`);
+      if (!res.ok) return;
+
+      const data = await res.json();
+      setMatchData(data);
+
+      if (data.status === "completed") {
+        clearInterval(interval);
+        window.location.href = `/result/${data.matchId}?userId=${encodeURIComponent(
+          userId
+        )}`;
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [waitingForOpponent, matchData, userId]);
+
+  useEffect(() => {
     if (isFinished) return;
 
     if (timeLeft <= 0) {
@@ -100,7 +122,7 @@ export default function MatchPage() {
     return () => clearTimeout(timer);
   }, [timeLeft, phaseIndex, isFinished]);
 
-  const handleEnd = async () => {
+  const handleSubmitDebate = async () => {
     if (!matchData || !userId) return;
 
     try {
@@ -113,25 +135,33 @@ export default function MatchPage() {
         },
         body: JSON.stringify({
           matchId: matchData.matchId,
-          winnerId: userId,
+          userId,
         }),
       });
 
       const data = await res.json();
 
-      if (!res.ok && data?.error !== "Match already completed") {
+      if (!res.ok) {
         setEnding(false);
-        alert("Failed to end match.");
+        alert("Failed to submit debate.");
         return;
       }
 
-      window.location.href = `/result/${matchData.matchId}?userId=${encodeURIComponent(
-        userId
-      )}`;
+      if (data.status === "completed" || data.alreadyCompleted) {
+        window.location.href = `/result/${matchData.matchId}?userId=${encodeURIComponent(
+          userId
+        )}`;
+        return;
+      }
+
+      if (data.status === "waiting") {
+        setWaitingForOpponent(true);
+        setEnding(false);
+      }
     } catch (error) {
       console.error(error);
       setEnding(false);
-      alert("Something went wrong ending the match.");
+      alert("Something went wrong submitting the debate.");
     }
   };
 
@@ -244,13 +274,23 @@ export default function MatchPage() {
               </div>
             </div>
 
+            {waitingForOpponent && (
+              <div className="mt-6 rounded-xl bg-gray-100 p-4 text-sm">
+                Waiting for the other debater to submit...
+              </div>
+            )}
+
             <div className="mt-8 flex flex-wrap gap-4">
               <button
-                onClick={handleEnd}
-                disabled={ending}
+                onClick={handleSubmitDebate}
+                disabled={ending || waitingForOpponent}
                 className="rounded-lg bg-black px-6 py-3 text-white disabled:opacity-50"
               >
-                {ending ? "Ending..." : "End Debate"}
+                {ending
+                  ? "Submitting..."
+                  : waitingForOpponent
+                  ? "Waiting..."
+                  : "Submit Debate"}
               </button>
 
               <Link
