@@ -9,6 +9,8 @@ type MatchResponse = {
   matchId: string;
   player1Id: string;
   player2Id: string;
+  player1Username: string;
+  player2Username: string;
   topicId: string;
   player1Side: string;
   player2Side: string;
@@ -85,8 +87,15 @@ export default function ResultPage() {
   const isPlayer1 = userId === matchData.player1Id;
   const yourNewRating = isPlayer1 ? matchData.rating1 : matchData.rating2;
   const yourDelta = isPlayer1 ? matchData.ratingChange1 : matchData.ratingChange2;
-  const winnerLabel =
-    matchData.winnerId === userId ? "You" : matchData.winnerId || "Unknown";
+
+  let winnerLabel = "Unknown";
+  if (matchData.winnerId === matchData.player1Id) {
+    winnerLabel =
+      matchData.winnerId === userId ? "You" : matchData.player1Username;
+  } else if (matchData.winnerId === matchData.player2Id) {
+    winnerLabel =
+      matchData.winnerId === userId ? "You" : matchData.player2Username;
+  }
 
   return (
     <main className="min-h-screen bg-white px-6 py-10 text-black">

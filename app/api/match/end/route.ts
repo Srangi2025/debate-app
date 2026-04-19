@@ -35,8 +35,8 @@ export async function POST(req: Request) {
       );
     }
 
-    const p1 = match.player1Id;
-    const p2 = match.player2Id;
+    const p1 = match.player1Id as string;
+    const p2 = match.player2Id as string;
 
     const rating1 = Number(await redis.get(`rating:${p1}`)) || 1000;
     const rating2 = Number(await redis.get(`rating:${p2}`)) || 1000;
@@ -48,6 +48,11 @@ export async function POST(req: Request) {
 
     await redis.set(`rating:${p1}`, newRating1);
     await redis.set(`rating:${p2}`, newRating2);
+
+    await redis.hset("users:ratings", {
+      [p1]: String(newRating1),
+      [p2]: String(newRating2),
+    });
 
     await redis.hset(`match:${matchId}`, {
       status: "completed",

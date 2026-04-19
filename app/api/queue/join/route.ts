@@ -3,6 +3,7 @@ import { redis } from "@/lib/redis";
 
 type JoinQueueBody = {
   userId: string;
+  username: string;
   rating: number;
   topicIds: string[];
 };
@@ -10,11 +11,16 @@ type JoinQueueBody = {
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as JoinQueueBody;
-    const { userId, rating, topicIds } = body;
+    const { userId, username, rating, topicIds } = body;
 
-    if (!userId || !Array.isArray(topicIds) || topicIds.length === 0) {
+    if (
+      !userId ||
+      !username ||
+      !Array.isArray(topicIds) ||
+      topicIds.length === 0
+    ) {
       return NextResponse.json(
-        { error: "Missing userId or topicIds" },
+        { error: "Missing userId, username, or topicIds" },
         { status: 400 }
       );
     }
@@ -25,15 +31,25 @@ export async function POST(req: Request) {
 
     await redis.hset(`queue:user:${userId}`, {
       userId,
+      username,
       rating: String(rating),
       topicIds: JSON.stringify(topicIds),
       joinedAt: String(joinedAt),
+    });
+
+    await redis.hset("users:ratings", {
+      [userId]: String(rating),
+    });
+
+    await redis.hset("users:usernames", {
+      [userId]: username,
     });
 
     return NextResponse.json({
       ok: true,
       queued: true,
       userId,
+      username,
       rating,
       topicIds,
     });

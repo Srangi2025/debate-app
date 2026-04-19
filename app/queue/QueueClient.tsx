@@ -25,6 +25,7 @@ export default function QueueClient() {
     [topicParam]
   );
 
+  const [username, setUsername] = useState<string>("");
   const [userId, setUserId] = useState<string | null>(null);
   const [status, setStatus] = useState<QueueState>("initializing");
   const [seconds, setSeconds] = useState(0);
@@ -33,6 +34,7 @@ export default function QueueClient() {
   const [matchTopicId, setMatchTopicId] = useState<string | null>(null);
   const [matchSide, setMatchSide] = useState<string | null>(null);
   const [opponentId, setOpponentId] = useState<string | null>(null);
+  const [opponentUsername, setOpponentUsername] = useState<string | null>(null);
 
   const topicTitle = useMemo(() => {
     if (!matchTopicId) return "";
@@ -41,13 +43,21 @@ export default function QueueClient() {
   }, [matchTopicId]);
 
   useEffect(() => {
-    const generatedId = "user_" + Math.random().toString(36).slice(2, 10);
+    const savedUsername = localStorage.getItem("debate_username") || "";
+    if (!savedUsername.trim()) {
+      window.location.href = "/dashboard";
+      return;
+    }
+
+    setUsername(savedUsername);
+
+    const generatedId = `user_${Math.random().toString(36).slice(2, 10)}`;
     setUserId(generatedId);
     setStatus("joining");
   }, []);
 
   useEffect(() => {
-    if (status !== "joining" || !userId) return;
+    if (status !== "joining" || !userId || !username) return;
 
     const joinQueue = async () => {
       try {
@@ -58,6 +68,7 @@ export default function QueueClient() {
           },
           body: JSON.stringify({
             userId,
+            username,
             rating: 1000,
             topicIds,
           }),
@@ -76,7 +87,7 @@ export default function QueueClient() {
     };
 
     joinQueue();
-  }, [status, userId, topicIds]);
+  }, [status, userId, username, topicIds]);
 
   useEffect(() => {
     if (status !== "searching" || !userId) return;
@@ -106,6 +117,7 @@ export default function QueueClient() {
           setMatchTopicId(data.topicId);
           setMatchSide(data.side);
           setOpponentId(data.opponentId);
+          setOpponentUsername(data.opponentUsername || data.opponentId);
           setStatus("matched");
           clearInterval(interval);
         }
@@ -143,8 +155,8 @@ export default function QueueClient() {
         <h1 className="text-4xl font-bold">Ranked Queue</h1>
 
         <div className="mt-8 rounded-2xl border p-6">
-          <p className="text-sm text-gray-500">User</p>
-          <p className="text-lg font-semibold">{userId ?? "Generating..."}</p>
+          <p className="text-sm text-gray-500">Username</p>
+          <p className="text-lg font-semibold">{username || "Loading..."}</p>
 
           <div className="mt-6">
             <p className="text-sm text-gray-500">Selected Topics</p>
@@ -173,7 +185,7 @@ export default function QueueClient() {
               <p><strong>Match ID:</strong> {matchId}</p>
               <p><strong>Topic:</strong> {topicTitle}</p>
               <p><strong>Your Side:</strong> {matchSide}</p>
-              <p><strong>Opponent:</strong> {opponentId}</p>
+              <p><strong>Opponent:</strong> {opponentUsername}</p>
             </div>
           )}
 

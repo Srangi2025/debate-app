@@ -15,6 +15,8 @@ type MatchResponse = {
   matchId: string;
   player1Id: string;
   player2Id: string;
+  player1Username: string;
+  player2Username: string;
   topicId: string;
   player1Side: string;
   player2Side: string;
@@ -111,11 +113,13 @@ export default function MatchPage() {
         },
         body: JSON.stringify({
           matchId: matchData.matchId,
-          winnerId: userId, // temporary winner logic
+          winnerId: userId,
         }),
       });
 
-      if (!res.ok) {
+      const data = await res.json();
+
+      if (!res.ok && data?.error !== "Match already completed") {
         setEnding(false);
         alert("Failed to end match.");
         return;
@@ -159,7 +163,9 @@ export default function MatchPage() {
 
   const isPlayer1 = userId === matchData.player1Id;
   const yourSide = isPlayer1 ? matchData.player1Side : matchData.player2Side;
-  const opponentId = isPlayer1 ? matchData.player2Id : matchData.player1Id;
+  const opponentUsername = isPlayer1
+    ? matchData.player2Username
+    : matchData.player1Username;
 
   const topicTitle =
     TOPICS.find((topic) => topic.id === matchData.topicId)?.title ||
@@ -200,7 +206,7 @@ export default function MatchPage() {
 
               <div className="rounded-xl bg-gray-100 p-4">
                 <p className="text-sm text-gray-500">Opponent</p>
-                <p className="mt-1 text-xl font-semibold">{opponentId}</p>
+                <p className="mt-1 text-xl font-semibold">{opponentUsername}</p>
               </div>
             </div>
 

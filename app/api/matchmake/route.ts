@@ -7,6 +7,7 @@ function overlap(a: string[], b: string[]) {
 
 type QueueUserData = {
   userId: string;
+  username: string;
   rating: string;
   topicIds: string;
   joinedAt: string;
@@ -47,7 +48,8 @@ export async function POST() {
           const player1Side = Math.random() > 0.5 ? "PRO" : "CON";
           const player2Side = player1Side === "PRO" ? "CON" : "PRO";
 
-          await redis.zrem("queue:global", userId, otherUserId);
+          await redis.zrem("queue:global", userId);
+          await redis.zrem("queue:global", otherUserId);
           await redis.del(`queue:user:${userId}`);
           await redis.del(`queue:user:${otherUserId}`);
 
@@ -55,6 +57,8 @@ export async function POST() {
             matchId,
             player1Id: userId,
             player2Id: otherUserId,
+            player1Username: rawA.username,
+            player2Username: rawB.username,
             topicId,
             player1Side,
             player2Side,

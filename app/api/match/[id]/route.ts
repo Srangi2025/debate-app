@@ -19,8 +19,8 @@ export async function GET(
       return NextResponse.json({ error: "Match not found" }, { status: 404 });
     }
 
-    const player1Id = matchData.player1Id;
-    const player2Id = matchData.player2Id;
+    const player1Id = matchData.player1Id as string;
+    const player2Id = matchData.player2Id as string;
 
     const rating1 = Number(await redis.get(`rating:${player1Id}`)) || 1000;
     const rating2 = Number(await redis.get(`rating:${player2Id}`)) || 1000;
@@ -29,6 +29,8 @@ export async function GET(
       matchId: matchData.matchId,
       player1Id: matchData.player1Id,
       player2Id: matchData.player2Id,
+      player1Username: matchData.player1Username,
+      player2Username: matchData.player2Username,
       topicId: matchData.topicId,
       player1Side: matchData.player1Side,
       player2Side: matchData.player2Side,
