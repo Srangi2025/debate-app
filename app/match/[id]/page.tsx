@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { TOPICS } from "@/lib/topics";
 
@@ -50,6 +50,10 @@ export default function MatchPage() {
   const [ending, setEnding] = useState(false);
   const [transcript, setTranscript] = useState("");
 
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+
   const [phaseIndex, setPhaseIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(PHASES[0].duration);
   const [isFinished, setIsFinished] = useState(false);
@@ -70,7 +74,7 @@ export default function MatchPage() {
         setMatchData(data);
         setLoading(false);
       } catch (error) {
-        console.error(error);
+        console.error("Failed to fetch match:", error);
         setLoading(false);
       }
     };
@@ -98,6 +102,49 @@ export default function MatchPage() {
 
     return () => clearTimeout(timer);
   }, [timeLeft, phaseIndex, isFinished]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function setupMedia() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: true,
+        });
+
+        if (!mounted) return;
+
+        localStreamRef.current = stream;
+
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream;
+        }
+      } catch (error) {
+        console.error("Camera/Mic error:", error);
+        alert("Please allow camera and microphone access.");
+      }
+    }
+
+    setupMedia();
+
+    return () => {
+      mounted = false;
+      localStreamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  function toggleMic() {
+    localStreamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = !track.enabled;
+    });
+  }
+
+  function toggleCamera() {
+    localStreamRef.current?.getVideoTracks().forEach((track) => {
+      track.enabled = !track.enabled;
+    });
+  }
 
   const handleSubmitDebate = async () => {
     if (!matchData || !matchData.id) {
@@ -142,7 +189,7 @@ export default function MatchPage() {
       setEnding(false);
       alert("No result URL returned.");
     } catch (error) {
-      console.error(error);
+      console.error("Submit debate error:", error);
       setEnding(false);
       alert("Something went wrong submitting the debate.");
     }
@@ -175,6 +222,9 @@ export default function MatchPage() {
   }
 
   const isPlayer1 = userId === matchData.player1?.userId;
+  const yourUsername = isPlayer1
+    ? matchData.player1?.username || "You"
+    : matchData.player2?.username || "You";
   const opponentUsername = isPlayer1
     ? matchData.player2?.username || "Opponent"
     : matchData.player1?.username || "Opponent";
@@ -199,7 +249,7 @@ export default function MatchPage() {
             <p className="text-sm uppercase tracking-wide text-gray-500">
               Match ID
             </p>
-            <h1 className="text-3xl font-bold">{matchData.id}</h1>
+            <h1 className="text-3xl font-bold break-all">{matchData.id}</h1>
           </div>
 
           <span className="rounded-full border px-4 py-2 text-sm font-medium">
@@ -209,7 +259,9 @@ export default function MatchPage() {
 
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
           <div className="rounded-2xl border p-6 lg:col-span-2">
-            <p className="text-sm uppercase tracking-wide text-gray-500">Topics</p>
+            <p className="text-sm uppercase tracking-wide text-gray-500">
+              Topics
+            </p>
             <div className="mt-2 flex flex-wrap gap-2">
               {topicTitles.map((title) => (
                 <span
@@ -224,11 +276,7 @@ export default function MatchPage() {
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               <div className="rounded-xl bg-gray-100 p-4">
                 <p className="text-sm text-gray-500">You</p>
-                <p className="mt-1 text-xl font-semibold">
-                  {isPlayer1
-                    ? matchData.player1?.username || "You"
-                    : matchData.player2?.username || "You"}
-                </p>
+                <p className="mt-1 text-xl font-semibold">{yourUsername}</p>
               </div>
 
               <div className="rounded-xl bg-gray-100 p-4">
@@ -260,6 +308,52 @@ export default function MatchPage() {
               <p className="mt-4 text-6xl font-bold">
                 {isFinished ? "0:00" : formatTime(timeLeft)}
               </p>
+            </div>
+
+            <div className="mt-8 grid gap-4 sm:grid-cols-2">
+              <div className="rounded-xl border p-4">
+                <p className="mb-3 text-sm uppercase tracking-wide text-gray-500">
+                  Your Camera
+                </p>
+                <video
+                  ref={localVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full rounded-lg bg-black aspect-video"
+                />
+              </div>
+
+              <div className="rounded-xl border p-4">
+                <p className="mb-3 text-sm uppercase tracking-wide text-gray-500">
+                  Opponent Camera
+                </p>
+                <video
+                  ref={remoteVideoRef}
+                  autoPlay
+                  playsInline
+                  className="w-full rounded-lg bg-black aspect-video"
+                />
+                <p className="mt-2 text-xs text-gray-500">
+                  Remote video will appear here after WebRTC signaling is added.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4 flex gap-3">
+              <button
+                onClick={toggleMic}
+                className="rounded-lg border px-4 py-2 text-black"
+              >
+                Toggle Mic
+              </button>
+
+              <button
+                onClick={toggleCamera}
+                className="rounded-lg border px-4 py-2 text-black"
+              >
+                Toggle Camera
+              </button>
             </div>
 
             <div className="mt-8 rounded-xl border p-6">
