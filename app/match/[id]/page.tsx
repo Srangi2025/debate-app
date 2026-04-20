@@ -49,16 +49,19 @@ export default function MatchPage() {
   const [loading, setLoading] = useState(true);
   const [ending, setEnding] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const remoteStreamRef = useRef<MediaStream | null>(null);
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const processedCandidatesRef = useRef<Set<string>>(new Set());
-  const localVideoRef = useRef<HTMLVideoElement | null>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
+  const [mediaReady, setMediaReady] = useState(false);
 
   const [phaseIndex, setPhaseIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(PHASES[0].duration);
   const [isFinished, setIsFinished] = useState(false);
+
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const processedCandidatesRef = useRef<Set<string>>(new Set());
+  const startedWebRTCRef = useRef(false);
 
   const currentPhase = useMemo(() => PHASES[phaseIndex], [phaseIndex]);
 
@@ -122,6 +125,8 @@ export default function MatchPage() {
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
         }
+
+        setMediaReady(true);
       } catch (error) {
         console.error("Camera/Mic error:", error);
         alert("Please allow camera and microphone access.");
@@ -131,72 +136,36 @@ export default function MatchPage() {
     setupMedia();
 
     return () => {
-  mounted = false;
-
-  localStreamRef.current?.getTracks().forEach((track) => track.stop());
-  remoteStreamRef.current?.getTracks().forEach((track) => track.stop());
-
-  pcRef.current?.close();
-};
+      mounted = false;
+      localStreamRef.current?.getTracks().forEach((track) => track.stop());
+      remoteStreamRef.current?.getTracks().forEach((track) => track.stop());
+      pcRef.current?.close();
+    };
   }, []);
-useEffect(() => {
-  if (!matchData || !localStreamRef.current) return;
 
-  const myUserId = localStorage.getItem("userId") || "";
-  if (!myUserId) return;
+  function createPeerConnection(matchId: string, myUserId: string) {
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+    });
 
-  const otherUserId =
-    matchData.player1?.userId === myUserId
-      ? matchData.player2?.userId || ""
-      : matchData.player1?.userId || "";
+    const remoteStream = new MediaStream();
+    remoteStreamRef.current = remoteStream;
 
-  if (!otherUserId) return;
-
-  const matchId = matchData.id;
-  const isCaller = myUserId < otherUserId;
-
-  const pc = createPeerConnection(matchId, myUserId);
-  pcRef.current = pc;
-
-  localStreamRef.current.getTracks().forEach((track) => {
-    pc.addTrack(track, localStreamRef.current!);
-  });
-
-  let stopped = false;
-  let interval: ReturnType<typeof setInterval> | null = null;
-
-  async function startWebRTC() {
-    if (isCaller) {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      await fetch("/api/webrtc/offer", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          matchId,
-          senderUserId: myUserId,
-          offer,
-        }),
-      });
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = remoteStream;
     }
 
-    interval = setInterval(async () => {
-      if (stopped) return;
+    pc.ontrack = (event) => {
+      event.streams[0].getTracks().forEach((track) => {
+        remoteStream.addTrack(track);
+      });
+    };
 
-      const res = await fetch(
-        `/api/webrtc/poll?matchId=${encodeURIComponent(matchId)}&otherUserId=${encodeURIComponent(otherUserId)}`
-      );
-      const data = await res.json();
+    pc.onicecandidate = async (event) => {
+      if (!event.candidate) return;
 
-      if (data.offer && !pc.currentRemoteDescription && !isCaller) {
-        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-
-        await fetch("/api/webrtc/answer", {
+      try {
+        await fetch("/api/webrtc/candidate", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -204,37 +173,136 @@ useEffect(() => {
           body: JSON.stringify({
             matchId,
             senderUserId: myUserId,
-            answer,
+            candidate: event.candidate,
           }),
         });
+      } catch (error) {
+        console.error("Failed to send ICE candidate:", error);
       }
+    };
 
-      if (data.answer && !pc.currentRemoteDescription && isCaller) {
-        await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-      }
-
-      for (const candidate of data.candidates || []) {
-        const key = JSON.stringify(candidate);
-        if (processedCandidatesRef.current.has(key)) continue;
-
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
-          processedCandidatesRef.current.add(key);
-        } catch (error) {
-          console.error("ICE candidate error", error);
-        }
-      }
-    }, 1500);
+    return pc;
   }
 
-  startWebRTC();
+  useEffect(() => {
+    if (!matchData || !mediaReady) return;
+    if (startedWebRTCRef.current) return;
 
-  return () => {
-    stopped = true;
-    if (interval) clearInterval(interval);
-    pc.close();
-  };
-}, [matchData]);
+    const myUserId = localStorage.getItem("userId") || "";
+    if (!myUserId) return;
+
+    const otherUserId =
+      matchData.player1?.userId === myUserId
+        ? matchData.player2?.userId || ""
+        : matchData.player1?.userId || "";
+
+    if (!otherUserId) return;
+    if (!localStreamRef.current) return;
+
+    startedWebRTCRef.current = true;
+    processedCandidatesRef.current = new Set();
+
+    const matchId = matchData.id;
+    const isCaller = myUserId < otherUserId;
+
+    const pc = createPeerConnection(matchId, myUserId);
+    pcRef.current = pc;
+
+    localStreamRef.current.getTracks().forEach((track) => {
+      pc.addTrack(track, localStreamRef.current as MediaStream);
+    });
+
+    let stopped = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    async function startWebRTC() {
+      try {
+        if (isCaller) {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+
+          await fetch("/api/webrtc/offer", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              matchId,
+              senderUserId: myUserId,
+              offer,
+            }),
+          });
+        }
+
+        interval = setInterval(async () => {
+          if (stopped) return;
+
+          try {
+            const res = await fetch(
+              `/api/webrtc/poll?matchId=${encodeURIComponent(matchId)}&otherUserId=${encodeURIComponent(otherUserId)}`
+            );
+
+            if (!res.ok) return;
+
+            const data = await res.json();
+
+            if (data.offer && !pc.currentRemoteDescription && !isCaller) {
+              await pc.setRemoteDescription(
+                new RTCSessionDescription(data.offer)
+              );
+
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+
+              await fetch("/api/webrtc/answer", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  matchId,
+                  senderUserId: myUserId,
+                  answer,
+                }),
+              });
+            }
+
+            if (data.answer && !pc.currentRemoteDescription && isCaller) {
+              await pc.setRemoteDescription(
+                new RTCSessionDescription(data.answer)
+              );
+            }
+
+            for (const candidate of data.candidates || []) {
+              const key = JSON.stringify(candidate);
+              if (processedCandidatesRef.current.has(key)) continue;
+
+              try {
+                await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                processedCandidatesRef.current.add(key);
+              } catch (error) {
+                console.error("ICE candidate error:", error);
+              }
+            }
+          } catch (error) {
+            console.error("Polling/signaling error:", error);
+          }
+        }, 1500);
+      } catch (error) {
+        console.error("WebRTC startup error:", error);
+      }
+    }
+
+    startWebRTC();
+
+    return () => {
+      stopped = true;
+      if (interval) clearInterval(interval);
+      pc.close();
+      startedWebRTCRef.current = false;
+    };
+  }, [matchData, mediaReady]);
+
   function toggleMic() {
     localStreamRef.current?.getAudioTracks().forEach((track) => {
       track.enabled = !track.enabled;
@@ -246,42 +314,7 @@ useEffect(() => {
       track.enabled = !track.enabled;
     });
   }
-  function createPeerConnection(matchId: string, myUserId: string) {
-  const pc = new RTCPeerConnection({
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-  });
 
-  const remoteStream = new MediaStream();
-  remoteStreamRef.current = remoteStream;
-
-  if (remoteVideoRef.current) {
-    remoteVideoRef.current.srcObject = remoteStream;
-  }
-
-  pc.ontrack = (event) => {
-    event.streams[0].getTracks().forEach((track) => {
-      remoteStream.addTrack(track);
-    });
-  };
-
-  pc.onicecandidate = async (event) => {
-    if (!event.candidate) return;
-
-    await fetch("/api/webrtc/candidate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        matchId,
-        senderUserId: myUserId,
-        candidate: event.candidate,
-      }),
-    });
-  };
-
-  return pc;
-}
   const handleSubmitDebate = async () => {
     if (!matchData || !matchData.id) {
       alert("Match not loaded yet. Try again.");
@@ -295,8 +328,6 @@ useEffect(() => {
 
     try {
       setEnding(true);
-
-      console.log("Submitting match id:", matchData.id);
 
       const res = await fetch("/api/match/end", {
         method: "POST",
@@ -470,9 +501,6 @@ useEffect(() => {
                   playsInline
                   className="w-full rounded-lg bg-black aspect-video"
                 />
-                <p className="mt-2 text-xs text-gray-500">
-                  Remote video will appear here after WebRTC signaling is added.
-                </p>
               </div>
             </div>
 
