@@ -315,7 +315,26 @@ const [cameraEnabled, setCameraEnabled] = useState(true);
     }
 
     startWebRTC();
+useEffect(() => {
+  if (!matchData || ending) return;
 
+  const interval = setInterval(async () => {
+    try {
+      const res = await fetch(`/api/match/${matchData.id}`);
+      if (!res.ok) return;
+
+      const data = await res.json();
+
+      if (data.status === "ended") {
+        window.location.href = `/result/${matchData.id}`;
+      }
+    } catch (error) {
+      console.error("Match status poll error:", error);
+    }
+  }, 2000);
+
+  return () => clearInterval(interval);
+}, [matchData, ending]);
     return () => {
       stopped = true;
       if (interval) clearInterval(interval);
@@ -339,52 +358,58 @@ const [cameraEnabled, setCameraEnabled] = useState(true);
   });
 }
 
-  const handleSubmitDebate = async () => {
-    if (!matchData || !matchData.id) {
-      alert("Match not loaded yet. Try again.");
+const handleSubmitDebate = async () => {
+  if (!matchData || !matchData.id) {
+    alert("Match not loaded yet. Try again.");
+    return;
+  }
+
+  if (!transcript.trim()) {
+    alert("Please enter your debate transcript.");
+    return;
+  }
+
+  try {
+    setEnding(true);
+
+    const res = await fetch("/api/match/end", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        matchId: matchData.id,
+        userId,
+        transcript,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      setEnding(false);
+      alert(data.error || "Failed to end match.");
       return;
     }
 
-    if (!transcript.trim()) {
-      alert("Please enter your debate transcript.");
+    if (data?.resultUrl && (data.status === "completed" || data.alreadyCompleted)) {
+      window.location.href = data.resultUrl;
       return;
     }
 
-    try {
-      setEnding(true);
-
-      const res = await fetch("/api/match/end", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          matchId: matchData.id,
-          winnerUserId: userId,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setEnding(false);
-        alert(data.error || "Failed to end match.");
-        return;
-      }
-
-      if (data?.resultUrl) {
-        window.location.href = data.resultUrl;
-        return;
-      }
-
+    if (data.status === "waiting") {
+      alert("Your debate was submitted. Waiting for the other player to submit.");
       setEnding(false);
-      alert("No result URL returned.");
-    } catch (error) {
-      console.error("Submit debate error:", error);
-      setEnding(false);
-      alert("Something went wrong submitting the debate.");
+      return;
     }
-  };
+
+    setEnding(false);
+  } catch (error) {
+    console.error("Submit debate error:", error);
+    setEnding(false);
+    alert("Something went wrong submitting the debate.");
+  }
+};
 
   if (loading) {
     return (
