@@ -46,6 +46,12 @@ export default function MatchPage() {
     typeof window !== "undefined" ? localStorage.getItem("userId") || "" : "";
 
   const [matchData, setMatchData] = useState<MatchResponse | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<
+  "idle" | "connecting" | "connected" | "disconnected" | "failed"
+>("idle");
+
+const [micEnabled, setMicEnabled] = useState(true);
+const [cameraEnabled, setCameraEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [ending, setEnding] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -143,46 +149,61 @@ export default function MatchPage() {
     };
   }, []);
 
-  function createPeerConnection(matchId: string, myUserId: string) {
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
+ function createPeerConnection(matchId: string, myUserId: string) {
+  const pc = new RTCPeerConnection({
+    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+  });
 
-    const remoteStream = new MediaStream();
-    remoteStreamRef.current = remoteStream;
+  const remoteStream = new MediaStream();
+  remoteStreamRef.current = remoteStream;
 
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.srcObject = remoteStream;
-    }
-
-    pc.ontrack = (event) => {
-      event.streams[0].getTracks().forEach((track) => {
-        remoteStream.addTrack(track);
-      });
-    };
-
-    pc.onicecandidate = async (event) => {
-      if (!event.candidate) return;
-
-      try {
-        await fetch("/api/webrtc/candidate", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            matchId,
-            senderUserId: myUserId,
-            candidate: event.candidate,
-          }),
-        });
-      } catch (error) {
-        console.error("Failed to send ICE candidate:", error);
-      }
-    };
-
-    return pc;
+  if (remoteVideoRef.current) {
+    remoteVideoRef.current.srcObject = remoteStream;
   }
+
+  pc.ontrack = (event) => {
+    event.streams[0].getTracks().forEach((track) => {
+      remoteStream.addTrack(track);
+    });
+  };
+
+  pc.onconnectionstatechange = () => {
+    const state = pc.connectionState;
+    console.log("WebRTC connectionState:", state);
+
+    if (state === "connected") setConnectionStatus("connected");
+    else if (state === "connecting") setConnectionStatus("connecting");
+    else if (state === "disconnected") setConnectionStatus("disconnected");
+    else if (state === "failed") setConnectionStatus("failed");
+    else if (state === "new") setConnectionStatus("idle");
+  };
+
+  pc.oniceconnectionstatechange = () => {
+    console.log("WebRTC iceConnectionState:", pc.iceConnectionState);
+  };
+
+  pc.onicecandidate = async (event) => {
+    if (!event.candidate) return;
+
+    try {
+      await fetch("/api/webrtc/candidate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          matchId,
+          senderUserId: myUserId,
+          candidate: event.candidate,
+        }),
+      });
+    } catch (error) {
+      console.error("Failed to send ICE candidate:", error);
+    }
+  };
+
+  return pc;
+}
 
   useEffect(() => {
     if (!matchData || !mediaReady) return;
@@ -204,7 +225,7 @@ export default function MatchPage() {
 
     const matchId = matchData.id;
     const isCaller = myUserId < otherUserId;
-
+    setConnectionStatus("connecting");
     const pc = createPeerConnection(matchId, myUserId);
     pcRef.current = pc;
 
@@ -300,20 +321,23 @@ export default function MatchPage() {
       if (interval) clearInterval(interval);
       pc.close();
       startedWebRTCRef.current = false;
+      setConnectionStatus("disconnected");
     };
   }, [matchData, mediaReady]);
 
   function toggleMic() {
-    localStreamRef.current?.getAudioTracks().forEach((track) => {
-      track.enabled = !track.enabled;
-    });
-  }
+  localStreamRef.current?.getAudioTracks().forEach((track) => {
+    track.enabled = !track.enabled;
+    setMicEnabled(track.enabled);
+  });
+}
 
-  function toggleCamera() {
-    localStreamRef.current?.getVideoTracks().forEach((track) => {
-      track.enabled = !track.enabled;
-    });
-  }
+ function toggleCamera() {
+  localStreamRef.current?.getVideoTracks().forEach((track) => {
+    track.enabled = !track.enabled;
+    setCameraEnabled(track.enabled);
+  });
+}
 
   const handleSubmitDebate = async () => {
     if (!matchData || !matchData.id) {
@@ -476,7 +500,18 @@ export default function MatchPage() {
                 {isFinished ? "0:00" : formatTime(timeLeft)}
               </p>
             </div>
-
+  <div className="mt-6 rounded-xl border p-4">
+      <p className="text-sm uppercase tracking-wide text-gray-500">
+      Call Status
+      </p>
+    <p className="mt-2 text-lg font-semibold">
+    {connectionStatus === "idle" && "Idle"}
+    {connectionStatus === "connecting" && "Connecting..."}
+    {connectionStatus === "connected" && "Connected"}
+    {connectionStatus === "disconnected" && "Disconnected"}
+    {connectionStatus === "failed" && "Connection Failed"}
+        </p>
+    </div>
             <div className="mt-8 grid gap-4 sm:grid-cols-2">
               <div className="rounded-xl border p-4">
                 <p className="mb-3 text-sm uppercase tracking-wide text-gray-500">
@@ -505,20 +540,20 @@ export default function MatchPage() {
             </div>
 
             <div className="mt-4 flex gap-3">
-              <button
-                onClick={toggleMic}
-                className="rounded-lg border px-4 py-2 text-black"
-              >
-                Toggle Mic
-              </button>
+  <button
+    onClick={toggleMic}
+    className="rounded-lg border px-4 py-2 text-black"
+  >
+    {micEnabled ? "Mute Mic" : "Unmute Mic"}
+  </button>
 
-              <button
-                onClick={toggleCamera}
-                className="rounded-lg border px-4 py-2 text-black"
-              >
-                Toggle Camera
-              </button>
-            </div>
+  <button
+    onClick={toggleCamera}
+    className="rounded-lg border px-4 py-2 text-black"
+  >
+    {cameraEnabled ? "Turn Camera Off" : "Turn Camera On"}
+  </button>
+</div>
 
             <div className="mt-8 rounded-xl border p-6">
               <p className="text-sm uppercase tracking-wide text-gray-500">
