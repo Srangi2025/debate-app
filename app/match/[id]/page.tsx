@@ -83,27 +83,6 @@ export default function MatchPage() {
   }, [params.id]);
 
   useEffect(() => {
-    if (!waitingForOpponent || !matchData) return;
-
-    const interval = setInterval(async () => {
-      const res = await fetch(`/api/match/${matchData.matchId}`);
-      if (!res.ok) return;
-
-      const data = await res.json();
-      setMatchData(data);
-
-      if (data.status === "completed") {
-        clearInterval(interval);
-        window.location.href = `/result/${data.matchId}?userId=${encodeURIComponent(
-          userId
-        )}`;
-      }
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [waitingForOpponent, matchData, userId]);
-
-  useEffect(() => {
     if (isFinished) return;
 
     if (timeLeft <= 0) {
@@ -124,49 +103,44 @@ export default function MatchPage() {
     return () => clearTimeout(timer);
   }, [timeLeft, phaseIndex, isFinished]);
 
-  const handleSubmitDebate = async () => {
-    if (!matchData || !userId || !transcript.trim()) return;
+ const handleSubmitDebate = async () => {
+  if (!matchData || !transcript.trim()) return;
 
-    try {
-      setEnding(true);
+  try {
+    setEnding(true);
 
-      const res = await fetch("/api/match/end", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          matchId: matchData.matchId,
-          userId,
-          transcript,
-        }),
-      });
+    const res = await fetch("/api/match/end", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        matchId: matchData.matchId,
+        winnerUserId: userId,
+      }),
+    });
 
-      const data = await res.json();
+    const data = await res.json();
 
-      if (!res.ok) {
-        setEnding(false);
-        alert(data.error || "Failed to submit debate.");
-        return;
-      }
-
-      if (data.status === "completed" || data.alreadyCompleted) {
-        window.location.href = `/result/${matchData.matchId}?userId=${encodeURIComponent(
-          userId
-        )}`;
-        return;
-      }
-
-      if (data.status === "waiting") {
-        setWaitingForOpponent(true);
-        setEnding(false);
-      }
-    } catch (error) {
-      console.error(error);
+    if (!res.ok) {
       setEnding(false);
-      alert("Something went wrong submitting the debate.");
+      alert(data.error || "Failed to end match.");
+      return;
     }
-  };
+
+    if (data?.resultUrl) {
+      window.location.href = data.resultUrl;
+      return;
+    }
+
+    setEnding(false);
+    alert("No result URL returned.");
+  } catch (error) {
+    console.error(error);
+    setEnding(false);
+    alert("Something went wrong submitting the debate.");
+  }
+};
 
   if (loading) {
     return (

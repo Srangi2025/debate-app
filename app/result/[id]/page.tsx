@@ -2,47 +2,41 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams } from "next/navigation";
 import { TOPICS } from "@/lib/topics";
 
-type MatchResponse = {
+type Player = {
+  userId: string;
+  username: string;
+};
+
+type ResultResponse = {
   matchId: string;
-  player1Id: string;
-  player2Id: string;
-  player1Username: string;
-  player2Username: string;
-  topicId: string;
-  player1Side: string;
-  player2Side: string;
+  topics: string[];
+  endedAt: number;
+  winner: Player | null;
+  loser: Player | null;
+  player1: Player | null;
+  player2: Player | null;
   status: string;
-  createdAt: string;
-  winnerId: string | null;
-  ratingChange1: string;
-  ratingChange2: string;
-  rating1: number;
-  rating2: number;
-  judgeReason?: string;
 };
 
 export default function ResultPage() {
   const params = useParams();
-  const searchParams = useSearchParams();
-  const userId = searchParams.get("userId") || "";
-
-  const [matchData, setMatchData] = useState<MatchResponse | null>(null);
+  const [resultData, setResultData] = useState<ResultResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const fetchMatch = async () => {
+    const fetchResult = async () => {
       try {
-        const res = await fetch(`/api/match/${params.id}`);
+        const res = await fetch(`/api/result/${params.id}`);
         if (!res.ok) {
           setLoading(false);
           return;
         }
 
         const data = await res.json();
-        setMatchData(data);
+        setResultData(data);
         setLoading(false);
       } catch (error) {
         console.error(error);
@@ -50,14 +44,17 @@ export default function ResultPage() {
       }
     };
 
-    fetchMatch();
+    fetchResult();
   }, [params.id]);
 
-  const topicTitle = useMemo(() => {
-    if (!matchData) return "";
-    const found = TOPICS.find((topic) => topic.id === matchData.topicId);
-    return found?.title ?? matchData.topicId;
-  }, [matchData]);
+  const topicTitles = useMemo(() => {
+    if (!resultData?.topics?.length) return [];
+
+    return resultData.topics.map((topicId) => {
+      const found = TOPICS.find((topic) => topic.id === topicId);
+      return found?.title ?? topicId;
+    });
+  }, [resultData]);
 
   if (loading) {
     return (
@@ -69,7 +66,7 @@ export default function ResultPage() {
     );
   }
 
-  if (!matchData) {
+  if (!resultData) {
     return (
       <main className="min-h-screen bg-white px-6 py-10 text-black">
         <div className="mx-auto max-w-3xl">
@@ -85,18 +82,7 @@ export default function ResultPage() {
     );
   }
 
-  const isPlayer1 = userId === matchData.player1Id;
-  const yourNewRating = isPlayer1 ? matchData.rating1 : matchData.rating2;
-  const yourDelta = isPlayer1 ? matchData.ratingChange1 : matchData.ratingChange2;
-
-  let winnerLabel = "Unknown";
-  if (matchData.winnerId === matchData.player1Id) {
-    winnerLabel =
-      matchData.winnerId === userId ? "You" : matchData.player1Username;
-  } else if (matchData.winnerId === matchData.player2Id) {
-    winnerLabel =
-      matchData.winnerId === userId ? "You" : matchData.player2Username;
-  }
+  const winnerLabel = resultData.winner?.username || "No winner recorded";
 
   return (
     <main className="min-h-screen bg-white px-6 py-10 text-black">
@@ -104,7 +90,7 @@ export default function ResultPage() {
         <p className="text-sm uppercase tracking-wide text-gray-500">
           Match Result
         </p>
-        <h1 className="mt-2 text-4xl font-bold">Match {matchData.matchId}</h1>
+        <h1 className="mt-2 text-4xl font-bold">Match {resultData.matchId}</h1>
 
         <div className="mt-8 rounded-2xl border p-8">
           <div className="rounded-xl bg-black p-8 text-white">
@@ -114,31 +100,46 @@ export default function ResultPage() {
 
           <div className="mt-6 grid gap-4 sm:grid-cols-2">
             <div className="rounded-xl bg-gray-100 p-5">
-              <p className="text-sm text-gray-500">Your Rating Change</p>
-              <p className="mt-2 text-3xl font-semibold">
-                {yourDelta.startsWith("-") ? yourDelta : `+${yourDelta}`}
+              <p className="text-sm text-gray-500">Player 1</p>
+              <p className="mt-2 text-2xl font-semibold">
+                {resultData.player1?.username || "Unknown"}
               </p>
             </div>
 
             <div className="rounded-xl bg-gray-100 p-5">
-              <p className="text-sm text-gray-500">Your New Rating</p>
-              <p className="mt-2 text-3xl font-semibold">{yourNewRating}</p>
+              <p className="text-sm text-gray-500">Player 2</p>
+              <p className="mt-2 text-2xl font-semibold">
+                {resultData.player2?.username || "Unknown"}
+              </p>
             </div>
           </div>
 
           <div className="mt-6 rounded-xl border p-5">
             <p className="text-sm uppercase tracking-wide text-gray-500">
-              Topic
+              Topics
             </p>
-            <p className="mt-3 text-lg font-medium">{topicTitle}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {topicTitles.length > 0 ? (
+                topicTitles.map((title) => (
+                  <span
+                    key={title}
+                    className="rounded-full border px-3 py-1 text-sm"
+                  >
+                    {title}
+                  </span>
+                ))
+              ) : (
+                <p className="text-gray-700">No topics available.</p>
+              )}
+            </div>
           </div>
 
           <div className="mt-6 rounded-xl border p-5">
             <p className="text-sm uppercase tracking-wide text-gray-500">
-              Judge Summary
+              Status
             </p>
             <p className="mt-3 text-gray-700">
-              {matchData.judgeReason || "No judge summary available."}
+              {resultData.status || "finished"}
             </p>
           </div>
 
