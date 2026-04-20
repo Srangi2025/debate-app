@@ -2,30 +2,27 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams } from "next/navigation";
 import { TOPICS } from "@/lib/topics";
+
+type Player = {
+  userId: string;
+  username: string;
+};
+
+type MatchResponse = {
+  id: string;
+  topics: string[];
+  createdAt: number;
+  status: string;
+  player1: Player | null;
+  player2: Player | null;
+};
 
 type DebatePhase = {
   key: string;
   label: string;
   duration: number;
-};
-
-type MatchResponse = {
-  matchId: string;
-  player1Id: string;
-  player2Id: string;
-  player1Username: string;
-  player2Username: string;
-  topicId: string;
-  player1Side: string;
-  player2Side: string;
-  status: string;
-  createdAt: string;
-  winnerId?: string;
-  ratingChange1?: string;
-  ratingChange2?: string;
-  judgeReason?: string;
 };
 
 const PHASES: DebatePhase[] = [
@@ -45,9 +42,8 @@ function formatTime(seconds: number) {
 
 export default function MatchPage() {
   const params = useParams();
-  const searchParams = useSearchParams();
-
-  const userId = searchParams.get("userId") || "";
+  const userId =
+    typeof window !== "undefined" ? localStorage.getItem("userId") || "" : "";
 
   const [matchData, setMatchData] = useState<MatchResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -70,6 +66,7 @@ export default function MatchPage() {
         }
 
         const data = await res.json();
+        console.log("Fetched match:", data);
         setMatchData(data);
         setLoading(false);
       } catch (error) {
@@ -102,54 +99,54 @@ export default function MatchPage() {
     return () => clearTimeout(timer);
   }, [timeLeft, phaseIndex, isFinished]);
 
- const handleSubmitDebate = async () => {
-  if (!matchData || !matchData.matchId) {
-    alert("Match not loaded yet. Try again.");
-    return;
-  }
+  const handleSubmitDebate = async () => {
+    if (!matchData || !matchData.id) {
+      alert("Match not loaded yet. Try again.");
+      return;
+    }
 
-  if (!transcript.trim()) {
-    alert("Please enter your debate transcript.");
-    return;
-  }
+    if (!transcript.trim()) {
+      alert("Please enter your debate transcript.");
+      return;
+    }
 
-  try {
-    setEnding(true);
+    try {
+      setEnding(true);
 
-    console.log("Submitting match:", matchData.matchId);
+      console.log("Submitting match id:", matchData.id);
 
-    const res = await fetch("/api/match/end", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        matchId: matchData.matchId,
-        winnerUserId: userId,
-      }),
-    });
+      const res = await fetch("/api/match/end", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          matchId: matchData.id,
+          winnerUserId: userId,
+        }),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (!res.ok) {
+      if (!res.ok) {
+        setEnding(false);
+        alert(data.error || "Failed to end match.");
+        return;
+      }
+
+      if (data?.resultUrl) {
+        window.location.href = data.resultUrl;
+        return;
+      }
+
       setEnding(false);
-      alert(data.error || "Failed to end match.");
-      return;
+      alert("No result URL returned.");
+    } catch (error) {
+      console.error(error);
+      setEnding(false);
+      alert("Something went wrong submitting the debate.");
     }
-
-    if (data?.resultUrl) {
-      window.location.href = data.resultUrl;
-      return;
-    }
-
-    setEnding(false);
-    alert("No result URL returned.");
-  } catch (error) {
-    console.error(error);
-    setEnding(false);
-    alert("Something went wrong submitting the debate.");
-  }
-};
+  };
 
   if (loading) {
     return (
@@ -177,15 +174,16 @@ export default function MatchPage() {
     );
   }
 
-  const isPlayer1 = userId === matchData.player1Id;
-  const yourSide = isPlayer1 ? matchData.player1Side : matchData.player2Side;
+  const isPlayer1 = userId === matchData.player1?.userId;
   const opponentUsername = isPlayer1
-    ? matchData.player2Username
-    : matchData.player1Username;
+    ? matchData.player2?.username || "Opponent"
+    : matchData.player1?.username || "Opponent";
 
-  const topicTitle =
-    TOPICS.find((topic) => topic.id === matchData.topicId)?.title ||
-    matchData.topicId;
+  const topicTitles =
+    matchData.topics?.map((topicId) => {
+      const found = TOPICS.find((topic) => topic.id === topicId);
+      return found?.title ?? topicId;
+    }) || [];
 
   const totalSeconds = PHASES.reduce((sum, phase) => sum + phase.duration, 0);
   const elapsedSeconds =
@@ -201,7 +199,7 @@ export default function MatchPage() {
             <p className="text-sm uppercase tracking-wide text-gray-500">
               Match ID
             </p>
-            <h1 className="text-3xl font-bold">{matchData.matchId}</h1>
+            <h1 className="text-3xl font-bold">{matchData.id}</h1>
           </div>
 
           <span className="rounded-full border px-4 py-2 text-sm font-medium">
@@ -211,13 +209,26 @@ export default function MatchPage() {
 
         <div className="mt-8 grid gap-6 lg:grid-cols-3">
           <div className="rounded-2xl border p-6 lg:col-span-2">
-            <p className="text-sm uppercase tracking-wide text-gray-500">Topic</p>
-            <h2 className="mt-2 text-2xl font-semibold">{topicTitle}</h2>
+            <p className="text-sm uppercase tracking-wide text-gray-500">Topics</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {topicTitles.map((title) => (
+                <span
+                  key={title}
+                  className="rounded-full border px-3 py-1 text-sm"
+                >
+                  {title}
+                </span>
+              ))}
+            </div>
 
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               <div className="rounded-xl bg-gray-100 p-4">
-                <p className="text-sm text-gray-500">Your side</p>
-                <p className="mt-1 text-xl font-semibold">{yourSide}</p>
+                <p className="text-sm text-gray-500">You</p>
+                <p className="mt-1 text-xl font-semibold">
+                  {isPlayer1
+                    ? matchData.player1?.username || "You"
+                    : matchData.player2?.username || "You"}
+                </p>
               </div>
 
               <div className="rounded-xl bg-gray-100 p-4">
@@ -263,14 +274,12 @@ export default function MatchPage() {
               />
             </div>
 
-            
-
             <div className="mt-8 flex flex-wrap gap-4">
-             <button
-  onClick={handleSubmitDebate}
-  disabled={ending || !transcript.trim() || !matchData}
-  className="rounded-lg bg-black px-6 py-3 text-white disabled:opacity-50"
->
+              <button
+                onClick={handleSubmitDebate}
+                disabled={ending || !transcript.trim() || !matchData}
+                className="rounded-lg bg-black px-6 py-3 text-white disabled:opacity-50"
+              >
                 {ending ? "Submitting..." : "Submit Debate"}
               </button>
 
