@@ -52,7 +52,6 @@ export default function MatchPage() {
   const [matchData, setMatchData] = useState<MatchResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [ending, setEnding] = useState(false);
-  const [waitingForOpponent, setWaitingForOpponent] = useState(false);
   const [transcript, setTranscript] = useState("");
 
   const [phaseIndex, setPhaseIndex] = useState(0);
@@ -104,10 +103,20 @@ export default function MatchPage() {
   }, [timeLeft, phaseIndex, isFinished]);
 
  const handleSubmitDebate = async () => {
-  if (!matchData || !transcript.trim()) return;
+  if (!matchData || !matchData.matchId) {
+    alert("Match not loaded yet. Try again.");
+    return;
+  }
+
+  if (!transcript.trim()) {
+    alert("Please enter your debate transcript.");
+    return;
+  }
 
   try {
     setEnding(true);
+
+    console.log("Submitting match:", matchData.matchId);
 
     const res = await fetch("/api/match/end", {
       method: "POST",
@@ -254,23 +263,15 @@ export default function MatchPage() {
               />
             </div>
 
-            {waitingForOpponent && (
-              <div className="mt-6 rounded-xl bg-gray-100 p-4 text-sm">
-                Waiting for the other debater to submit...
-              </div>
-            )}
+            
 
             <div className="mt-8 flex flex-wrap gap-4">
-              <button
-                onClick={handleSubmitDebate}
-                disabled={ending || waitingForOpponent || !transcript.trim()}
-                className="rounded-lg bg-black px-6 py-3 text-white disabled:opacity-50"
-              >
-                {ending
-                  ? "Submitting..."
-                  : waitingForOpponent
-                  ? "Waiting..."
-                  : "Submit Debate"}
+             <button
+  onClick={handleSubmitDebate}
+  disabled={ending || !transcript.trim() || !matchData}
+  className="rounded-lg bg-black px-6 py-3 text-white disabled:opacity-50"
+>
+                {ending ? "Submitting..." : "Submit Debate"}
               </button>
 
               <Link
