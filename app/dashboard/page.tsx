@@ -2,14 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { TOPICS } from "@/lib/topics";
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [username, setUsername] = useState("");
 
   useEffect(() => {
-    const saved = localStorage.getItem("debate_username");
+    const saved = localStorage.getItem("username");
     if (saved) setUsername(saved);
   }, []);
 
@@ -27,9 +29,31 @@ export default function DashboardPage() {
 
   const saveUsername = () => {
     const trimmed = username.trim();
-    if (!trimmed) return;
-    localStorage.setItem("debate_username", trimmed);
+    if (!trimmed) {
+      alert("Please enter a username.");
+      return;
+    }
+
+    localStorage.setItem("username", trimmed);
     setUsername(trimmed);
+  };
+
+  const handleJoinQueue = () => {
+    const trimmed = username.trim();
+
+    if (!trimmed) {
+      alert("Please enter a username.");
+      return;
+    }
+
+    if (selectedTopics.length === 0) {
+      alert("Please select at least one topic.");
+      return;
+    }
+
+    localStorage.setItem("username", trimmed);
+
+    router.push(`/queue?topics=${encodeURIComponent(selectedTopics.join(","))}`);
   };
 
   return (
@@ -81,7 +105,7 @@ export default function DashboardPage() {
 
           <div className="mt-6">
             <p className="text-lg font-semibold">
-              {username.trim() || "DemoUser"}
+              {username.trim() || "No username saved"}
             </p>
             <p className="text-sm text-gray-600">Rating: 1000 · Record: 0-0</p>
           </div>
@@ -111,21 +135,16 @@ export default function DashboardPage() {
           </div>
 
           <div className="mt-8 flex flex-wrap gap-4">
-            <Link
-              href={{
-                pathname: "/queue",
-                query: {
-                  topics: selectedTopics.join(","),
-                },
-              }}
+            <button
+              onClick={handleJoinQueue}
               className={`rounded-lg px-6 py-3 text-white ${
                 selectedTopics.length > 0 && username.trim()
                   ? "bg-black"
-                  : "pointer-events-none bg-gray-400"
+                  : "cursor-not-allowed bg-gray-400"
               }`}
             >
               Join Queue
-            </Link>
+            </button>
           </div>
         </div>
       </div>

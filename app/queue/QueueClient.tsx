@@ -37,8 +37,13 @@ export default function QueueClient() {
     if (topics.length === 0) return;
 
     const userId = getOrCreateUserId();
-    const username = localStorage.getItem("username") || "Anonymous";
+    const username = (localStorage.getItem("username") || "").trim();
 
+if (!username) {
+  alert("No username found. Please go back and enter a username.");
+  router.push("/dashboard");
+  return;
+}
     let stopped = false;
     let statusInterval: ReturnType<typeof setInterval> | null = null;
 
