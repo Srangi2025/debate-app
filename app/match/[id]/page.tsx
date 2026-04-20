@@ -25,6 +25,7 @@ type MatchResponse = {
   winnerId?: string;
   ratingChange1?: string;
   ratingChange2?: string;
+  judgeReason?: string;
 };
 
 const PHASES: DebatePhase[] = [
@@ -52,6 +53,7 @@ export default function MatchPage() {
   const [loading, setLoading] = useState(true);
   const [ending, setEnding] = useState(false);
   const [waitingForOpponent, setWaitingForOpponent] = useState(false);
+  const [transcript, setTranscript] = useState("");
 
   const [phaseIndex, setPhaseIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(PHASES[0].duration);
@@ -123,7 +125,7 @@ export default function MatchPage() {
   }, [timeLeft, phaseIndex, isFinished]);
 
   const handleSubmitDebate = async () => {
-    if (!matchData || !userId) return;
+    if (!matchData || !userId || !transcript.trim()) return;
 
     try {
       setEnding(true);
@@ -136,6 +138,7 @@ export default function MatchPage() {
         body: JSON.stringify({
           matchId: matchData.matchId,
           userId,
+          transcript,
         }),
       });
 
@@ -143,7 +146,7 @@ export default function MatchPage() {
 
       if (!res.ok) {
         setEnding(false);
-        alert("Failed to submit debate.");
+        alert(data.error || "Failed to submit debate.");
         return;
       }
 
@@ -265,13 +268,16 @@ export default function MatchPage() {
               </p>
             </div>
 
-            <div className="mt-8 rounded-xl border border-dashed p-6">
+            <div className="mt-8 rounded-xl border p-6">
               <p className="text-sm uppercase tracking-wide text-gray-500">
-                Audio / Camera Area
+                Debate Transcript / Summary
               </p>
-              <div className="mt-3 flex h-48 items-center justify-center rounded-xl bg-gray-100 text-gray-500">
-                LiveKit audio + optional camera will go here
-              </div>
+              <textarea
+                value={transcript}
+                onChange={(e) => setTranscript(e.target.value)}
+                placeholder="Paste or write your side of the debate here..."
+                className="mt-3 h-40 w-full rounded-xl border px-4 py-3 outline-none focus:border-black"
+              />
             </div>
 
             {waitingForOpponent && (
@@ -283,7 +289,7 @@ export default function MatchPage() {
             <div className="mt-8 flex flex-wrap gap-4">
               <button
                 onClick={handleSubmitDebate}
-                disabled={ending || waitingForOpponent}
+                disabled={ending || waitingForOpponent || !transcript.trim()}
                 className="rounded-lg bg-black px-6 py-3 text-white disabled:opacity-50"
               >
                 {ending

@@ -66,6 +66,9 @@ export async function POST() {
             createdAt: String(Date.now()),
             player1Submitted: "false",
             player2Submitted: "false",
+            player1Transcript: "",
+            player2Transcript: "",
+            judgeReason: "",
           });
 
           await redis.set(`match:user:${userId}`, matchId);

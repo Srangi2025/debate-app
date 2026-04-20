@@ -1,63 +1,103 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
+import { normalizeTopics, topicsKey } from "@/lib/topics";
 
-type JoinQueueBody = {
+type QueueUser = {
   userId: string;
   username: string;
-  rating: number;
-  topicIds: string[];
+  topics: string[];
+  joinedAt: number;
 };
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as JoinQueueBody;
-    const { userId, username, rating, topicIds } = body;
+    const body = await req.json();
 
-    if (
-      !userId ||
-      !username ||
-      !Array.isArray(topicIds) ||
-      topicIds.length === 0
-    ) {
+    const userId = String(body.userId || "").trim();
+    const username = String(body.username || "").trim();
+    const topics = normalizeTopics(body.topics || []);
+
+    if (!userId || !username || topics.length === 0) {
       return NextResponse.json(
-        { error: "Missing userId, username, or topicIds" },
+        { error: "Missing userId, username, or topics" },
         { status: 400 }
       );
     }
 
-    const joinedAt = Date.now();
+    const existingMatchId = await redis.get<string>(`user:${userId}:match`);
+    if (existingMatchId) {
+      return NextResponse.json({
+        matched: true,
+        matchId: existingMatchId,
+      });
+    }
 
-    await redis.zadd("queue:global", { score: rating, member: userId });
+    const key = topicsKey(topics);
+    const queueKey = `queue:topics:${key}`;
 
-    await redis.hset(`queue:user:${userId}`, {
+    const me: QueueUser = {
       userId,
       username,
-      rating: String(rating),
-      topicIds: JSON.stringify(topicIds),
-      joinedAt: String(joinedAt),
-    });
+      topics,
+      joinedAt: Date.now(),
+    };
 
-    await redis.hset("users:ratings", {
-      [userId]: String(rating),
-    });
+    const rawQueuedUsers = await redis.lrange<string[]>(queueKey, 0, -1);
+    const queuedUsers: QueueUser[] = (rawQueuedUsers || []).map((item) =>
+      typeof item === "string" ? JSON.parse(item) : item
+    );
 
-    await redis.hset("users:usernames", {
-      [userId]: username,
-    });
+    const opponent = queuedUsers.find((u) => u.userId !== userId);
+
+    if (opponent) {
+      await redis.lrem(queueKey, 1, JSON.stringify(opponent));
+
+      const matchId = crypto.randomUUID();
+      const now = Date.now();
+
+      const match = {
+        id: matchId,
+        topics,
+        createdAt: now,
+        status: "active",
+        player1: {
+          userId: opponent.userId,
+          username: opponent.username,
+        },
+        player2: {
+          userId,
+          username,
+        },
+      };
+
+      await redis.set(`match:${matchId}`, match);
+      await redis.set(`user:${opponent.userId}:match`, matchId);
+      await redis.set(`user:${userId}:match`, matchId);
+
+      await redis.del(`user:${opponent.userId}:queue`);
+      await redis.del(`user:${userId}:queue`);
+
+      return NextResponse.json({
+        matched: true,
+        matchId,
+      });
+    }
+
+    const alreadyQueued = queuedUsers.some((u) => u.userId === userId);
+
+    if (!alreadyQueued) {
+      await redis.rpush(queueKey, JSON.stringify(me));
+    }
+
+    await redis.set(`user:${userId}:queue`, key);
 
     return NextResponse.json({
-      ok: true,
+      matched: false,
       queued: true,
-      userId,
-      username,
-      rating,
-      topicIds,
+      topicKey: key,
     });
   } catch (error) {
     console.error("queue/join error", error);
-    return NextResponse.json(
-      { error: "Failed to join queue" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

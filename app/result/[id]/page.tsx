@@ -21,6 +21,7 @@ type MatchResponse = {
   ratingChange2: string;
   rating1: number;
   rating2: number;
+  judgeReason?: string;
 };
 
 export default function ResultPage() {
@@ -134,11 +135,10 @@ export default function ResultPage() {
 
           <div className="mt-6 rounded-xl border p-5">
             <p className="text-sm uppercase tracking-wide text-gray-500">
-              AI Judge Summary
+              Judge Summary
             </p>
             <p className="mt-3 text-gray-700">
-              Temporary placeholder. Next step is replacing manual winner selection
-              with real AI judging and a generated explanation.
+              {matchData.judgeReason || "No judge summary available."}
             </p>
           </div>
 

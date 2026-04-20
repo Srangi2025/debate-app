@@ -18,3 +18,15 @@ export const TOPICS: DebateTopic[] = [
   { id: "animal-testing", title: "Animal testing should be banned", category: "Ethics" },
   { id: "crypto", title: "Cryptocurrency is a net positive for society", category: "Finance" },
 ];
+
+export function normalizeTopics(topics: string[]): string[] {
+  return [...new Set(
+    topics
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean)
+  )].sort();
+}
+
+export function topicsKey(topics: string[]): string {
+  return normalizeTopics(topics).join("|");
+}

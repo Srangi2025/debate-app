@@ -1,215 +1,110 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { TOPICS } from "@/lib/topics";
+import { useRouter, useSearchParams } from "next/navigation";
 
-type QueueState =
-  | "initializing"
-  | "joining"
-  | "searching"
-  | "matched"
-  | "error";
+function getOrCreateUserId() {
+  let id = localStorage.getItem("userId");
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem("userId", id);
+  }
+  return id;
+}
 
 export default function QueueClient() {
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const topicParam = searchParams.get("topics") || "";
-
-  const topicIds = useMemo(
-    () =>
-      topicParam
-        .split(",")
-        .map((id) => id.trim())
-        .filter(Boolean),
-    [topicParam]
-  );
-
-  const [username, setUsername] = useState<string>("");
-  const [userId, setUserId] = useState<string | null>(null);
-  const [status, setStatus] = useState<QueueState>("initializing");
   const [seconds, setSeconds] = useState(0);
 
-  const [matchId, setMatchId] = useState<string | null>(null);
-  const [matchTopicId, setMatchTopicId] = useState<string | null>(null);
-  const [matchSide, setMatchSide] = useState<string | null>(null);
-  const [opponentId, setOpponentId] = useState<string | null>(null);
-  const [opponentUsername, setOpponentUsername] = useState<string | null>(null);
-
-  const topicTitle = useMemo(() => {
-    if (!matchTopicId) return "";
-    const found = TOPICS.find((topic) => topic.id === matchTopicId);
-    return found?.title ?? matchTopicId;
-  }, [matchTopicId]);
+  const topics = useMemo(() => {
+    const raw = searchParams.get("topics") || "";
+    return raw
+      .split(",")
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean);
+  }, [searchParams]);
 
   useEffect(() => {
-    const savedUsername = localStorage.getItem("debate_username") || "";
-    if (!savedUsername.trim()) {
-      window.location.href = "/dashboard";
-      return;
-    }
+    const timer = setInterval(() => {
+      setSeconds((s) => s + 1);
+    }, 1000);
 
-    setUsername(savedUsername);
-
-    const generatedId = `user_${Math.random().toString(36).slice(2, 10)}`;
-    setUserId(generatedId);
-    setStatus("joining");
+    return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
-    if (status !== "joining" || !userId || !username) return;
+    if (topics.length === 0) return;
 
-    const joinQueue = async () => {
-      try {
-        const res = await fetch("/api/queue/join", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            userId,
-            username,
-            rating: 1000,
-            topicIds,
-          }),
-        });
+    const userId = getOrCreateUserId();
+    const username = localStorage.getItem("username") || "Anonymous";
 
-        if (!res.ok) {
-          setStatus("error");
-          return;
-        }
+    let stopped = false;
+    let statusInterval: ReturnType<typeof setInterval> | null = null;
 
-        setStatus("searching");
-      } catch (error) {
-        console.error(error);
-        setStatus("error");
-      }
-    };
-
-    joinQueue();
-  }, [status, userId, username, topicIds]);
-
-  useEffect(() => {
-    if (status !== "searching" || !userId) return;
-
-    const interval = setInterval(async () => {
-      try {
-        setSeconds((prev) => prev + 2);
-
-        await fetch("/api/matchmake", {
-          method: "POST",
-        });
-
-        const res = await fetch(
-          `/api/queue/status?userId=${encodeURIComponent(userId)}`
-        );
-
-        if (!res.ok) {
-          setStatus("error");
-          clearInterval(interval);
-          return;
-        }
-
-        const data = await res.json();
-
-        if (data.matchFound) {
-          setMatchId(data.matchId);
-          setMatchTopicId(data.topicId);
-          setMatchSide(data.side);
-          setOpponentId(data.opponentId);
-          setOpponentUsername(data.opponentUsername || data.opponentId);
-          setStatus("matched");
-          clearInterval(interval);
-        }
-      } catch (error) {
-        console.error(error);
-        setStatus("error");
-        clearInterval(interval);
-      }
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [status, userId]);
-
-  const leaveQueue = async () => {
-    if (!userId) return;
-
-    try {
-      await fetch("/api/queue/leave", {
+    async function startQueue() {
+      const joinRes = await fetch("/api/queue/join", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ userId }),
+        body: JSON.stringify({
+          userId,
+          username,
+          topics,
+        }),
       });
-    } catch (error) {
-      console.error(error);
+
+      const joinData = await joinRes.json();
+
+      if (joinData.matched && joinData.matchId) {
+        router.push(`/match/${joinData.matchId}`);
+        return;
+      }
+
+      statusInterval = setInterval(async () => {
+        if (stopped) return;
+
+        const statusRes = await fetch(`/api/queue/status?userId=${userId}`);
+        const statusData = await statusRes.json();
+
+        if (statusData.matched && statusData.matchId) {
+          if (statusInterval) clearInterval(statusInterval);
+          router.push(`/match/${statusData.matchId}`);
+        }
+      }, 2000);
     }
 
-    window.location.href = "/dashboard";
-  };
+    startQueue();
+
+    return () => {
+      stopped = true;
+      if (statusInterval) clearInterval(statusInterval);
+    };
+  }, [router, topics]);
+
+  async function handleLeave() {
+    const userId = localStorage.getItem("userId");
+    if (!userId) {
+      router.push("/dashboard");
+      return;
+    }
+
+    await fetch("/api/queue/leave", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ userId }),
+    });
+
+    router.push("/dashboard");
+  }
 
   return (
-    <main className="min-h-screen bg-white px-6 py-10 text-black">
-      <div className="mx-auto max-w-3xl">
-        <h1 className="text-4xl font-bold">Ranked Queue</h1>
-
-        <div className="mt-8 rounded-2xl border p-6">
-          <p className="text-sm text-gray-500">Username</p>
-          <p className="text-lg font-semibold">{username || "Loading..."}</p>
-
-          <div className="mt-6">
-            <p className="text-sm text-gray-500">Selected Topics</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {topicIds.map((topicId) => (
-                <span
-                  key={topicId}
-                  className="rounded-full border px-3 py-1 text-sm"
-                >
-                  {topicId}
-                </span>
-              ))}
-            </div>
-          </div>
-
-          <p className="mt-6 text-lg">
-            {status === "initializing" && "Initializing..."}
-            {status === "joining" && "Joining queue..."}
-            {status === "searching" && `Searching... (${seconds}s)`}
-            {status === "matched" && "Match Found!"}
-            {status === "error" && "Something went wrong."}
-          </p>
-
-          {status === "matched" && (
-            <div className="mt-6 rounded-xl bg-gray-100 p-4">
-              <p><strong>Match ID:</strong> {matchId}</p>
-              <p><strong>Topic:</strong> {topicTitle}</p>
-              <p><strong>Your Side:</strong> {matchSide}</p>
-              <p><strong>Opponent:</strong> {opponentUsername}</p>
-            </div>
-          )}
-
-          <div className="mt-8 flex gap-4">
-            {status !== "matched" ? (
-              <button
-                onClick={leaveQueue}
-                className="rounded-lg border px-6 py-3"
-              >
-                Leave
-              </button>
-            ) : (
-              <Link
-                href={`/match/${matchId}?userId=${encodeURIComponent(
-                  userId || ""
-                )}`}
-                className="rounded-lg bg-black px-6 py-3 text-white"
-              >
-                Enter Match
-              </Link>
-            )}
-          </div>
-        </div>
-      </div>
-    </main>
+    <div>
+      <p>Searching... ({seconds}s)</p>
+      <button onClick={handleLeave}>Leave</button>
+    </div>
   );
 }
