@@ -3,10 +3,12 @@ import { redis } from "@/lib/redis";
 
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const match = await redis.get(`match:${params.id}`);
+    const { id } = await context.params;
+
+    const match = await redis.get(`match:${id}`);
 
     if (!match) {
       return NextResponse.json({ error: "Match not found" }, { status: 404 });
