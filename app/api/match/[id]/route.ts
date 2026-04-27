@@ -8,6 +8,10 @@ export async function GET(
   try {
     const { id } = await context.params;
 
+    if (!id) {
+      return NextResponse.json({ error: "Missing match ID" }, { status: 400 });
+    }
+
     const match = await redis.get(`match:${id}`);
 
     if (!match) {
@@ -17,6 +21,9 @@ export async function GET(
     return NextResponse.json(match);
   } catch (error) {
     console.error("match/[id] error", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
   }
 }
