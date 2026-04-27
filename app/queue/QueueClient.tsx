@@ -25,6 +25,7 @@ export default function QueueClient() {
       .filter(Boolean);
   }, [searchParams]);
 
+  // Timer
   useEffect(() => {
     const timer = setInterval(() => {
       setSeconds((s) => s + 1);
@@ -33,51 +34,74 @@ export default function QueueClient() {
     return () => clearInterval(timer);
   }, []);
 
+  // Queue logic
   useEffect(() => {
     if (topics.length === 0) return;
 
     const userId = getOrCreateUserId();
     const username = (localStorage.getItem("username") || "").trim();
 
-if (!username) {
-  alert("No username found. Please go back and enter a username.");
-  router.push("/dashboard");
-  return;
-}
+    if (!username) {
+      alert("No username found. Please go back and enter a username.");
+      router.push("/dashboard");
+      return;
+    }
+
     let stopped = false;
     let statusInterval: ReturnType<typeof setInterval> | null = null;
 
     async function startQueue() {
-      const joinRes = await fetch("/api/queue/join", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          userId,
-          username,
-          topics,
-        }),
-      });
+      try {
+        const joinRes = await fetch("/api/queue/join", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            userId,
+            username,
+            topics,
+          }),
+        });
 
-      const joinData = await joinRes.json();
-
-      if (joinData.matched && joinData.matchId) {
-        router.push(`/match/${joinData.matchId}`);
-        return;
-      }
-
-      statusInterval = setInterval(async () => {
-        if (stopped) return;
-
-        const statusRes = await fetch(`/api/queue/status?userId=${userId}`);
-        const statusData = await statusRes.json();
-
-        if (statusData.matched && statusData.matchId) {
-          if (statusInterval) clearInterval(statusInterval);
-          router.push(`/match/${statusData.matchId}`);
+        if (!joinRes.ok) {
+          const err = await joinRes.json();
+          console.error("Join failed:", err);
+          alert("Failed to join queue.");
+          return;
         }
-      }, 2000);
+
+        const joinData = await joinRes.json();
+
+        if (joinData.matched && joinData.matchId) {
+          router.push(`/match/${joinData.matchId}`);
+          return;
+        }
+
+        // Start polling
+        statusInterval = setInterval(async () => {
+          if (stopped) return;
+
+          try {
+            const statusRes = await fetch(
+              `/api/queue/status?userId=${userId}`
+            );
+
+            if (!statusRes.ok) return;
+
+            const statusData = await statusRes.json();
+
+            if (statusData.matched && statusData.matchId) {
+              if (statusInterval) clearInterval(statusInterval);
+              router.push(`/match/${statusData.matchId}`);
+            }
+          } catch (err) {
+            console.error("Status polling error:", err);
+          }
+        }, 2000);
+      } catch (err) {
+        console.error("Queue error:", err);
+      }
     }
 
     startQueue();
@@ -90,18 +114,23 @@ if (!username) {
 
   async function handleLeave() {
     const userId = localStorage.getItem("userId");
+
     if (!userId) {
       router.push("/dashboard");
       return;
     }
 
-    await fetch("/api/queue/leave", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ userId }),
-    });
+    try {
+      await fetch("/api/queue/leave", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ userId }),
+      });
+    } catch (err) {
+      console.error("Leave error:", err);
+    }
 
     router.push("/dashboard");
   }
