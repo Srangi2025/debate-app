@@ -42,20 +42,21 @@ function formatTime(seconds: number) {
 
 export default function MatchPage() {
   const params = useParams();
-  const userId =
-    typeof window !== "undefined" ? localStorage.getItem("userId") || "" : "";
+  const matchId = Array.isArray(params.id) ? params.id[0] : params.id;
 
+  const [userId, setUserId] = useState("");
   const [matchData, setMatchData] = useState<MatchResponse | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<
-  "idle" | "connecting" | "connected" | "disconnected" | "failed"
->("idle");
-
-const [micEnabled, setMicEnabled] = useState(true);
-const [cameraEnabled, setCameraEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [ending, setEnding] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [mediaReady, setMediaReady] = useState(false);
+
+  const [connectionStatus, setConnectionStatus] = useState<
+    "idle" | "connecting" | "connected" | "disconnected" | "failed"
+  >("idle");
+
+  const [micEnabled, setMicEnabled] = useState(true);
+  const [cameraEnabled, setCameraEnabled] = useState(true);
 
   const [phaseIndex, setPhaseIndex] = useState(0);
   const [timeLeft, setTimeLeft] = useState(PHASES[0].duration);
@@ -72,26 +73,33 @@ const [cameraEnabled, setCameraEnabled] = useState(true);
   const currentPhase = useMemo(() => PHASES[phaseIndex], [phaseIndex]);
 
   useEffect(() => {
-    const fetchMatch = async () => {
+    const storedUserId = localStorage.getItem("userId") || "";
+    setUserId(storedUserId);
+  }, []);
+
+  useEffect(() => {
+    if (!matchId) return;
+
+    async function fetchMatch() {
       try {
-        const res = await fetch(`/api/match/${params.id}`);
+        const res = await fetch(`/api/match/${matchId}`);
+
         if (!res.ok) {
           setLoading(false);
           return;
         }
 
-        const data = await res.json();
-        console.log("Fetched match:", data);
+        const data: MatchResponse = await res.json();
         setMatchData(data);
-        setLoading(false);
       } catch (error) {
         console.error("Failed to fetch match:", error);
+      } finally {
         setLoading(false);
       }
-    };
+    }
 
     fetchMatch();
-  }, [params.id]);
+  }, [matchId]);
 
   useEffect(() => {
     if (isFinished) return;
@@ -104,6 +112,7 @@ const [cameraEnabled, setCameraEnabled] = useState(true);
       } else {
         setIsFinished(true);
       }
+
       return;
     }
 
@@ -143,101 +152,113 @@ const [cameraEnabled, setCameraEnabled] = useState(true);
 
     return () => {
       mounted = false;
+
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
       remoteStreamRef.current?.getTracks().forEach((track) => track.stop());
+
       pcRef.current?.close();
+      pcRef.current = null;
+      startedWebRTCRef.current = false;
     };
   }, []);
 
- function createPeerConnection(matchId: string, myUserId: string) {
-  const pc = new RTCPeerConnection({
-    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-  });
+  function createPeerConnection(currentMatchId: string, myUserId: string) {
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+    });
 
-  const remoteStream = new MediaStream();
-  remoteStreamRef.current = remoteStream;
+    const remoteStream = new MediaStream();
+    remoteStreamRef.current = remoteStream;
 
-  if (remoteVideoRef.current) {
-    remoteVideoRef.current.srcObject = remoteStream;
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+
+    pc.ontrack = (event) => {
+      event.streams[0].getTracks().forEach((track) => {
+        remoteStream.addTrack(track);
+      });
+    };
+
+    pc.onconnectionstatechange = () => {
+      const state = pc.connectionState;
+      console.log("WebRTC connectionState:", state);
+
+      if (state === "connected") setConnectionStatus("connected");
+      else if (state === "connecting") setConnectionStatus("connecting");
+      else if (state === "disconnected") setConnectionStatus("disconnected");
+      else if (state === "failed") setConnectionStatus("failed");
+      else if (state === "new") setConnectionStatus("idle");
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log("WebRTC iceConnectionState:", pc.iceConnectionState);
+    };
+
+    pc.onicecandidate = async (event) => {
+      if (!event.candidate) return;
+
+      try {
+        await fetch("/api/webrtc/candidate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            matchId: currentMatchId,
+            senderUserId: myUserId,
+            candidate: event.candidate,
+          }),
+        });
+      } catch (error) {
+        console.error("Failed to send ICE candidate:", error);
+      }
+    };
+
+    return pc;
   }
 
-  pc.ontrack = (event) => {
-    event.streams[0].getTracks().forEach((track) => {
-      remoteStream.addTrack(track);
-    });
-  };
-
-  pc.onconnectionstatechange = () => {
-    const state = pc.connectionState;
-    console.log("WebRTC connectionState:", state);
-
-    if (state === "connected") setConnectionStatus("connected");
-    else if (state === "connecting") setConnectionStatus("connecting");
-    else if (state === "disconnected") setConnectionStatus("disconnected");
-    else if (state === "failed") setConnectionStatus("failed");
-    else if (state === "new") setConnectionStatus("idle");
-  };
-
-  pc.oniceconnectionstatechange = () => {
-    console.log("WebRTC iceConnectionState:", pc.iceConnectionState);
-  };
-
-  pc.onicecandidate = async (event) => {
-    if (!event.candidate) return;
-
-    try {
-      await fetch("/api/webrtc/candidate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          matchId,
-          senderUserId: myUserId,
-          candidate: event.candidate,
-        }),
-      });
-    } catch (error) {
-      console.error("Failed to send ICE candidate:", error);
-    }
-  };
-
-  return pc;
-}
-
   useEffect(() => {
-    if (!matchData || !mediaReady) return;
+    if (!matchData || !mediaReady || !userId) return;
     if (startedWebRTCRef.current) return;
 
-    const myUserId = localStorage.getItem("userId") || "";
-    if (!myUserId) return;
-
     const otherUserId =
-      matchData.player1?.userId === myUserId
+      matchData.player1?.userId === userId
         ? matchData.player2?.userId || ""
         : matchData.player1?.userId || "";
 
-    if (!otherUserId) return;
-    if (!localStreamRef.current) return;
+    if (!otherUserId || !localStreamRef.current) return;
 
     startedWebRTCRef.current = true;
     processedCandidatesRef.current = new Set();
 
-    const matchId = matchData.id;
-    const isCaller = myUserId < otherUserId;
-    setConnectionStatus("connecting");
-    const pc = createPeerConnection(matchId, myUserId);
-    pcRef.current = pc;
-
-    localStreamRef.current.getTracks().forEach((track) => {
-      pc.addTrack(track, localStreamRef.current as MediaStream);
-    });
+    const currentMatchId = matchData.id;
+    const isCaller = userId < otherUserId;
 
     let stopped = false;
     let interval: ReturnType<typeof setInterval> | null = null;
 
     async function startWebRTC() {
       try {
+        setConnectionStatus("connecting");
+
+        if (isCaller) {
+          await fetch("/api/webrtc/reset", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ matchId: currentMatchId }),
+          });
+        }
+
+        const pc = createPeerConnection(currentMatchId, userId);
+        pcRef.current = pc;
+
+        localStreamRef.current?.getTracks().forEach((track) => {
+          pc.addTrack(track, localStreamRef.current as MediaStream);
+        });
+
         if (isCaller) {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
@@ -248,8 +269,8 @@ const [cameraEnabled, setCameraEnabled] = useState(true);
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              matchId,
-              senderUserId: myUserId,
+              matchId: currentMatchId,
+              senderUserId: userId,
               offer,
             }),
           });
@@ -260,7 +281,9 @@ const [cameraEnabled, setCameraEnabled] = useState(true);
 
           try {
             const res = await fetch(
-              `/api/webrtc/poll?matchId=${encodeURIComponent(matchId)}&otherUserId=${encodeURIComponent(otherUserId)}`
+              `/api/webrtc/poll?matchId=${encodeURIComponent(
+                currentMatchId
+              )}&otherUserId=${encodeURIComponent(otherUserId)}`
             );
 
             if (!res.ok) return;
@@ -281,8 +304,8 @@ const [cameraEnabled, setCameraEnabled] = useState(true);
                   "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
-                  matchId,
-                  senderUserId: myUserId,
+                  matchId: currentMatchId,
+                  senderUserId: userId,
                   answer,
                 }),
               });
@@ -311,105 +334,119 @@ const [cameraEnabled, setCameraEnabled] = useState(true);
         }, 1500);
       } catch (error) {
         console.error("WebRTC startup error:", error);
+        setConnectionStatus("failed");
       }
     }
 
     startWebRTC();
-useEffect(() => {
-  if (!matchData || ending) return;
 
-  const interval = setInterval(async () => {
-    try {
-      const res = await fetch(`/api/match/${matchData.id}`);
-      if (!res.ok) return;
-
-      const data = await res.json();
-
-      if (data.status === "ended") {
-        window.location.href = `/result/${matchData.id}`;
-      }
-    } catch (error) {
-      console.error("Match status poll error:", error);
-    }
-  }, 2000);
-
-  return () => clearInterval(interval);
-}, [matchData, ending]);
     return () => {
       stopped = true;
+
       if (interval) clearInterval(interval);
-      pc.close();
+
+      pcRef.current?.close();
+      pcRef.current = null;
       startedWebRTCRef.current = false;
       setConnectionStatus("disconnected");
     };
-  }, [matchData, mediaReady]);
+  }, [matchData, mediaReady, userId]);
+
+  useEffect(() => {
+    if (!matchData || ending) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/match/${matchData.id}`);
+        if (!res.ok) return;
+
+        const data = await res.json();
+
+        if (data.status === "ended") {
+          window.location.href = `/result/${matchData.id}`;
+        }
+      } catch (error) {
+        console.error("Match status poll error:", error);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [matchData, ending]);
 
   function toggleMic() {
-  localStreamRef.current?.getAudioTracks().forEach((track) => {
-    track.enabled = !track.enabled;
-    setMicEnabled(track.enabled);
-  });
-}
-
- function toggleCamera() {
-  localStreamRef.current?.getVideoTracks().forEach((track) => {
-    track.enabled = !track.enabled;
-    setCameraEnabled(track.enabled);
-  });
-}
-
-const handleSubmitDebate = async () => {
-  if (!matchData || !matchData.id) {
-    alert("Match not loaded yet. Try again.");
-    return;
-  }
-
-  if (!transcript.trim()) {
-    alert("Please enter your debate transcript.");
-    return;
-  }
-
-  try {
-    setEnding(true);
-
-    const res = await fetch("/api/match/end", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        matchId: matchData.id,
-        userId,
-        transcript,
-      }),
+    localStreamRef.current?.getAudioTracks().forEach((track) => {
+      track.enabled = !track.enabled;
+      setMicEnabled(track.enabled);
     });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      setEnding(false);
-      alert(data.error || "Failed to end match.");
-      return;
-    }
-
-    if (data?.resultUrl && (data.status === "completed" || data.alreadyCompleted)) {
-      window.location.href = data.resultUrl;
-      return;
-    }
-
-    if (data.status === "waiting") {
-      alert("Your debate was submitted. Waiting for the other player to submit.");
-      setEnding(false);
-      return;
-    }
-
-    setEnding(false);
-  } catch (error) {
-    console.error("Submit debate error:", error);
-    setEnding(false);
-    alert("Something went wrong submitting the debate.");
   }
-};
+
+  function toggleCamera() {
+    localStreamRef.current?.getVideoTracks().forEach((track) => {
+      track.enabled = !track.enabled;
+      setCameraEnabled(track.enabled);
+    });
+  }
+
+  async function handleSubmitDebate() {
+    if (!matchData?.id) {
+      alert("Match not loaded yet. Try again.");
+      return;
+    }
+
+    if (!userId) {
+      alert("Missing user ID. Go back to dashboard and join again.");
+      return;
+    }
+
+    if (!transcript.trim()) {
+      alert("Please enter your debate transcript.");
+      return;
+    }
+
+    try {
+      setEnding(true);
+
+      const res = await fetch("/api/match/end", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          matchId: matchData.id,
+          userId,
+          transcript,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.error || "Failed to end match.");
+        setEnding(false);
+        return;
+      }
+
+      if (
+        data?.resultUrl &&
+        (data.status === "completed" || data.alreadyCompleted)
+      ) {
+        window.location.href = data.resultUrl;
+        return;
+      }
+
+      if (data.status === "waiting") {
+        alert("Your debate was submitted. Waiting for the other player.");
+        setEnding(false);
+        return;
+      }
+
+      setEnding(false);
+    } catch (error) {
+      console.error("Submit debate error:", error);
+      setEnding(false);
+      alert("Something went wrong submitting the debate.");
+    }
+  }
 
   if (loading) {
     return (
@@ -438,9 +475,11 @@ const handleSubmitDebate = async () => {
   }
 
   const isPlayer1 = userId === matchData.player1?.userId;
+
   const yourUsername = isPlayer1
     ? matchData.player1?.username || "You"
     : matchData.player2?.username || "You";
+
   const opponentUsername = isPlayer1
     ? matchData.player2?.username || "Opponent"
     : matchData.player1?.username || "Opponent";
@@ -452,9 +491,13 @@ const handleSubmitDebate = async () => {
     }) || [];
 
   const totalSeconds = PHASES.reduce((sum, phase) => sum + phase.duration, 0);
+
   const elapsedSeconds =
-    PHASES.slice(0, phaseIndex).reduce((sum, phase) => sum + phase.duration, 0) +
-    (currentPhase.duration - timeLeft);
+    PHASES.slice(0, phaseIndex).reduce(
+      (sum, phase) => sum + phase.duration,
+      0
+    ) + (currentPhase.duration - timeLeft);
+
   const progress = Math.min((elapsedSeconds / totalSeconds) * 100, 100);
 
   return (
@@ -465,7 +508,7 @@ const handleSubmitDebate = async () => {
             <p className="text-sm uppercase tracking-wide text-gray-500">
               Match ID
             </p>
-            <h1 className="text-3xl font-bold break-all">{matchData.id}</h1>
+            <h1 className="break-all text-3xl font-bold">{matchData.id}</h1>
           </div>
 
           <span className="rounded-full border px-4 py-2 text-sm font-medium">
@@ -478,6 +521,7 @@ const handleSubmitDebate = async () => {
             <p className="text-sm uppercase tracking-wide text-gray-500">
               Topics
             </p>
+
             <div className="mt-2 flex flex-wrap gap-2">
               {topicTitles.map((title) => (
                 <span
@@ -497,7 +541,9 @@ const handleSubmitDebate = async () => {
 
               <div className="rounded-xl bg-gray-100 p-4">
                 <p className="text-sm text-gray-500">Opponent</p>
-                <p className="mt-1 text-xl font-semibold">{opponentUsername}</p>
+                <p className="mt-1 text-xl font-semibold">
+                  {opponentUsername}
+                </p>
               </div>
             </div>
 
@@ -506,6 +552,7 @@ const handleSubmitDebate = async () => {
                 <span>Match Progress</span>
                 <span>{Math.round(progress)}%</span>
               </div>
+
               <div className="h-3 w-full rounded-full bg-gray-200">
                 <div
                   className="h-3 rounded-full bg-black transition-all"
@@ -525,18 +572,20 @@ const handleSubmitDebate = async () => {
                 {isFinished ? "0:00" : formatTime(timeLeft)}
               </p>
             </div>
-  <div className="mt-6 rounded-xl border p-4">
-      <p className="text-sm uppercase tracking-wide text-gray-500">
-      Call Status
-      </p>
-    <p className="mt-2 text-lg font-semibold">
-    {connectionStatus === "idle" && "Idle"}
-    {connectionStatus === "connecting" && "Connecting..."}
-    {connectionStatus === "connected" && "Connected"}
-    {connectionStatus === "disconnected" && "Disconnected"}
-    {connectionStatus === "failed" && "Connection Failed"}
-        </p>
-    </div>
+
+            <div className="mt-6 rounded-xl border p-4">
+              <p className="text-sm uppercase tracking-wide text-gray-500">
+                Call Status
+              </p>
+              <p className="mt-2 text-lg font-semibold">
+                {connectionStatus === "idle" && "Idle"}
+                {connectionStatus === "connecting" && "Connecting..."}
+                {connectionStatus === "connected" && "Connected"}
+                {connectionStatus === "disconnected" && "Disconnected"}
+                {connectionStatus === "failed" && "Connection Failed"}
+              </p>
+            </div>
+
             <div className="mt-8 grid gap-4 sm:grid-cols-2">
               <div className="rounded-xl border p-4">
                 <p className="mb-3 text-sm uppercase tracking-wide text-gray-500">
@@ -547,7 +596,7 @@ const handleSubmitDebate = async () => {
                   autoPlay
                   playsInline
                   muted
-                  className="w-full rounded-lg bg-black aspect-video"
+                  className="aspect-video w-full rounded-lg bg-black"
                 />
               </div>
 
@@ -559,31 +608,32 @@ const handleSubmitDebate = async () => {
                   ref={remoteVideoRef}
                   autoPlay
                   playsInline
-                  className="w-full rounded-lg bg-black aspect-video"
+                  className="aspect-video w-full rounded-lg bg-black"
                 />
               </div>
             </div>
 
             <div className="mt-4 flex gap-3">
-  <button
-    onClick={toggleMic}
-    className="rounded-lg border px-4 py-2 text-black"
-  >
-    {micEnabled ? "Mute Mic" : "Unmute Mic"}
-  </button>
+              <button
+                onClick={toggleMic}
+                className="rounded-lg border px-4 py-2 text-black"
+              >
+                {micEnabled ? "Mute Mic" : "Unmute Mic"}
+              </button>
 
-  <button
-    onClick={toggleCamera}
-    className="rounded-lg border px-4 py-2 text-black"
-  >
-    {cameraEnabled ? "Turn Camera Off" : "Turn Camera On"}
-  </button>
-</div>
+              <button
+                onClick={toggleCamera}
+                className="rounded-lg border px-4 py-2 text-black"
+              >
+                {cameraEnabled ? "Turn Camera Off" : "Turn Camera On"}
+              </button>
+            </div>
 
             <div className="mt-8 rounded-xl border p-6">
               <p className="text-sm uppercase tracking-wide text-gray-500">
                 Debate Transcript / Summary
               </p>
+
               <textarea
                 value={transcript}
                 onChange={(e) => setTranscript(e.target.value)}
