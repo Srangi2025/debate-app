@@ -1,34 +1,19 @@
 import { authenticate } from "@/lib/server-auth";
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
+import { QUEUE_SCRIPT, type QueueResponse } from "@/lib/matchmaking";
+import { normalizeTopics, TOPICS } from "@/lib/topics";
 
-export async function GET(req: NextRequest) {
+export async function GET(req: Request) {
   try {
     const auth = await authenticate(req);
     if (auth.response) return auth.response;
-    const userId = auth.userId;
-
-
-    if (!userId) {
-      return NextResponse.json({ error: "Missing userId" }, { status: 400 });
-    }
-
-    const matchId = await redis.get<string>(`user:${userId}:match`);
-    if (matchId) {
-      return NextResponse.json({
-        matched: true,
-        matchId,
-      });
-    }
-
-    const queueTopicKey = await redis.get<string>(`user:${userId}:queue`);
-
-    return NextResponse.json({
-      matched: false,
-      queued: !!queueTopicKey,
-    });
+    const result = await redis.eval<QueueResponse>(QUEUE_SCRIPT, [], [
+      auth.userId!, Date.now(), "status", "", "[]", crypto.randomUUID(), "",
+    ]);
+    return NextResponse.json(result);
   } catch (error) {
     console.error("queue/status error", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: "Unable to status queue" }, { status: 500 });
   }
 }

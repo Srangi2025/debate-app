@@ -1,30 +1,31 @@
 "use client";
 
-import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 let client: SupabaseClient | undefined;
-let pendingSession: Promise<Session> | undefined;
+type ParticipantSession = { user: { id: string }; access_token?: string };
+let pendingSession: Promise<ParticipantSession> | undefined;
 
 function getClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  if (!url || !key) throw new Error("Guest sign-in is not configured. Add the Supabase environment variables.");
+  if (!url || !key) return undefined;
   return (client ??= createClient(url, key));
 }
 
-export function getGuestSession(): Promise<Session> {
+export function getGuestSession(): Promise<ParticipantSession> {
   // Share initialization across components, including React's development effect replay.
   if (!pendingSession) {
     pendingSession = (async () => {
       const supabase = getClient();
-      const { data, error } = await supabase.auth.getSession();
-      if (error) throw new Error("Unable to restore your guest session. Please reload.");
-      if (data.session) return data.session;
-      const signedIn = await supabase.auth.signInAnonymously();
-      if (signedIn.error || !signedIn.data.session) {
-        throw new Error("Guest sign-in failed. Check your connection and that anonymous sign-ins are enabled in Supabase.");
+      if (supabase) {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw new Error("Unable to restore your session. Please reload.");
+        if (data.session) return data.session;
       }
-      return signedIn.data.session;
+      const response = await fetch("/api/session", { method: "POST", cache: "no-store" });
+      if (!response.ok) throw new Error("Unable to create a guest session. Please retry.");
+      return response.json();
     })().finally(() => { pendingSession = undefined; });
   }
   return pendingSession;
@@ -33,6 +34,6 @@ export function getGuestSession(): Promise<Session> {
 export async function authenticatedFetch(url: string, init: RequestInit = {}) {
   const session = await getGuestSession();
   const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${session.access_token}`);
+  if (session.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
   return fetch(url, { ...init, headers, cache: "no-store" });
 }

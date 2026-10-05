@@ -1,10 +1,25 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { randomUUID } from "node:crypto";
 import { redis } from "@/lib/redis";
 
 export async function authenticate(req: Request) {
   const token = req.headers.get("authorization")?.match(/^Bearer (\S+)$/i)?.[1];
-  if (!token) return { response: NextResponse.json({ error: "Guest sign-in required" }, { status: 401 }) };
+  if (!token) {
+    const store = await cookies();
+    const credential = store.get("debate-guest")?.value;
+    const existing = credential ? await redis.get<string>(`guest-session:${credential}`) : null;
+    if (existing) return { userId: existing };
+    const sessionId = randomUUID();
+    const userId = `guest:${randomUUID()}`;
+    await redis.set(`guest-session:${sessionId}`, userId, { ex: 60 * 60 * 24 * 30 });
+    store.set("debate-guest", sessionId, {
+      httpOnly: true, sameSite: "lax", secure: new URL(req.url).protocol === "https:",
+      path: "/", maxAge: 60 * 60 * 24 * 30,
+    });
+    return { userId };
+  }
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   if (!url || !key) return { response: NextResponse.json({ error: "Authentication is not configured" }, { status: 503 }) };

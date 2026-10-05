@@ -1,48 +1,19 @@
 import { authenticate } from "@/lib/server-auth";
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
+import { QUEUE_SCRIPT, type QueueResponse } from "@/lib/matchmaking";
+import { normalizeTopics, TOPICS } from "@/lib/topics";
 
-type QueueUser = {
-  userId: string;
-  username: string;
-  topics: string[];
-  joinedAt: number;
-};
-
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
     const auth = await authenticate(req);
     if (auth.response) return auth.response;
-    const userId = auth.userId;
-
-    const body = await req.json();
-
-    if (!userId) {
-      return NextResponse.json({ error: "Missing userId" }, { status: 400 });
-    }
-
-    const topicKey = await redis.get<string>(`user:${userId}:queue`);
-    if (!topicKey) {
-      return NextResponse.json({ ok: true });
-    }
-
-    const queueKey = `queue:topics:${topicKey}`;
-    const rawQueuedUsers = await redis.lrange<string[]>(queueKey, 0, -1);
-    const queuedUsers: QueueUser[] = (rawQueuedUsers || []).map((item) =>
-      typeof item === "string" ? JSON.parse(item) : item
-    );
-
-    const userToRemove = queuedUsers.find((u) => u.userId === userId);
-
-    if (userToRemove) {
-      await redis.lrem(queueKey, 1, JSON.stringify(userToRemove));
-    }
-
-    await redis.del(`user:${userId}:queue`);
-
-    return NextResponse.json({ ok: true });
+    const result = await redis.eval<QueueResponse>(QUEUE_SCRIPT, [], [
+      auth.userId!, Date.now(), "leave", "", "[]", crypto.randomUUID(), "",
+    ]);
+    return NextResponse.json(result);
   } catch (error) {
     console.error("queue/leave error", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: "Unable to leave queue" }, { status: 500 });
   }
 }
