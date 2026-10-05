@@ -8,9 +8,9 @@ export async function GET(req: Request) {
   try {
     const auth = await authenticate(req);
     if (auth.response) return auth.response;
-    const result = await redis.eval<QueueResponse>(QUEUE_SCRIPT, [], [
+    const result = await redis.eval(QUEUE_SCRIPT, [], [
       auth.userId!, Date.now(), "status", "", "[]", crypto.randomUUID(), "",
-    ]);
+    ]) as QueueResponse;
     return NextResponse.json(result);
   } catch (error) {
     console.error("queue/status error", error);

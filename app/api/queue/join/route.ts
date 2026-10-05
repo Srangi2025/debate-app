@@ -17,9 +17,9 @@ export async function POST(req: Request) {
     if (!topics.length || topics.length > 5 || topics.some(topic => !TOPICS.some(known => known.id === topic))) {
       return NextResponse.json({ error: "Select between one and five valid topics" }, { status: 400 });
     }
-    const result = await redis.eval<QueueResponse>(QUEUE_SCRIPT, [], [
+    const result = await redis.eval(QUEUE_SCRIPT, [], [
       auth.userId!, Date.now(), "join", body.username.trim().slice(0, 100), JSON.stringify(topics), crypto.randomUUID(), "",
-    ]);
+    ]) as QueueResponse;
     return NextResponse.json(result);
   } catch (error) {
     console.error("queue/join error", error);
