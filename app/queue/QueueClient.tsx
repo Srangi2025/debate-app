@@ -2,20 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-
-function getOrCreateUserId() {
-  let id = localStorage.getItem("userId");
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem("userId", id);
-  }
-  return id;
-}
+import { authenticatedFetch, getGuestSession } from "@/lib/guest-auth";
 
 export default function QueueClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [seconds, setSeconds] = useState(0);
+  const [error, setError] = useState("");
 
   const topics = useMemo(() => {
     const raw = searchParams.get("topics") || "";
@@ -38,7 +31,6 @@ export default function QueueClient() {
   useEffect(() => {
     if (topics.length === 0) return;
 
-    const userId = getOrCreateUserId();
     const username = (localStorage.getItem("username") || "").trim();
 
     if (!username) {
@@ -52,13 +44,15 @@ export default function QueueClient() {
 
     async function startQueue() {
       try {
-        const joinRes = await fetch("/api/queue/join", {
+        setError("");
+        await getGuestSession();
+        if (stopped) return;
+        const joinRes = await authenticatedFetch("/api/queue/join", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            userId,
             username,
             topics,
           }),
@@ -66,12 +60,11 @@ export default function QueueClient() {
 
         if (!joinRes.ok) {
           const err = await joinRes.json();
-          console.error("Join failed:", err);
-          alert("Failed to join queue.");
-          return;
+          throw new Error(err.error || "Failed to join queue.");
         }
 
         const joinData = await joinRes.json();
+        if (stopped) return;
 
         if (joinData.matched && joinData.matchId) {
           router.push(`/match/${joinData.matchId}`);
@@ -83,13 +76,12 @@ export default function QueueClient() {
           if (stopped) return;
 
           try {
-            const statusRes = await fetch(
-              `/api/queue/status?userId=${userId}`
-            );
+            const statusRes = await authenticatedFetch("/api/queue/status");
 
             if (!statusRes.ok) return;
 
             const statusData = await statusRes.json();
+            if (stopped) return;
 
             if (statusData.matched && statusData.matchId) {
               if (statusInterval) clearInterval(statusInterval);
@@ -100,7 +92,9 @@ export default function QueueClient() {
           }
         }, 2000);
       } catch (err) {
-        console.error("Queue error:", err);
+        if (!stopped) {
+          setError(err instanceof Error ? err.message : "Unable to join queue.");
+        }
       }
     }
 
@@ -113,23 +107,18 @@ export default function QueueClient() {
   }, [router, topics]);
 
   async function handleLeave() {
-    const userId = localStorage.getItem("userId");
-
-    if (!userId) {
-      router.push("/dashboard");
-      return;
-    }
-
     try {
-      await fetch("/api/queue/leave", {
+      const res = await authenticatedFetch("/api/queue/leave", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ userId }),
+        body: JSON.stringify({}),
       });
+      if (!res.ok) throw new Error("Unable to leave queue. Please try again.");
     } catch (err) {
-      console.error("Leave error:", err);
+      setError(err instanceof Error ? err.message : "Unable to leave queue.");
+      return;
     }
 
     router.push("/dashboard");
@@ -137,7 +126,7 @@ export default function QueueClient() {
 
   return (
     <div>
-      <p>Searching... ({seconds}s)</p>
+      {error ? <p role="alert">{error}</p> : <p>Searching... ({seconds}s)</p>}
       <button onClick={handleLeave}>Leave</button>
     </div>
   );

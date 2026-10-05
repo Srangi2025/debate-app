@@ -1,12 +1,20 @@
+import { authenticate, authorizeMatch } from "@/lib/server-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
+    const auth = await authenticate(req);
+    if (auth.response) return auth.response;
+    const userId = auth.userId;
+
     const { id } = await context.params;
+
+    const access = await authorizeMatch(id, userId);
+    if (access.response) return access.response;
 
     const result = await redis.get(`result:${id}`);
 

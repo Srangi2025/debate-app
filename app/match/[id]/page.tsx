@@ -1,5 +1,6 @@
 "use client";
 
+import { authenticatedFetch, getGuestSession } from "@/lib/guest-auth";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
@@ -17,6 +18,8 @@ type MatchResponse = {
   status: string;
   player1: Player | null;
   player2: Player | null;
+  submissionReceived?: boolean;
+  submittedTranscript?: string;
 };
 
 type DebatePhase = {
@@ -48,6 +51,8 @@ export default function MatchPage() {
   const [matchData, setMatchData] = useState<MatchResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [ending, setEnding] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [submissionError, setSubmissionError] = useState("");
   const [transcript, setTranscript] = useState("");
   const [mediaReady, setMediaReady] = useState(false);
 
@@ -73,8 +78,13 @@ export default function MatchPage() {
   const currentPhase = useMemo(() => PHASES[phaseIndex], [phaseIndex]);
 
   useEffect(() => {
-    const storedUserId = localStorage.getItem("userId") || "";
-    setUserId(storedUserId);
+    let active = true;
+    getGuestSession().then((session) => {
+      if (active) setUserId(session.user.id);
+    }).catch((error) => {
+      if (active) alert(error.message);
+    });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -82,7 +92,7 @@ export default function MatchPage() {
 
     async function fetchMatch() {
       try {
-        const res = await fetch(`/api/match/${matchId}`);
+        const res = await authenticatedFetch(`/api/match/${matchId}`);
 
         if (!res.ok) {
           setLoading(false);
@@ -90,6 +100,8 @@ export default function MatchPage() {
         }
 
         const data: MatchResponse = await res.json();
+        setSubmitted(Boolean(data.submissionReceived));
+        if (data.submittedTranscript) setTranscript(data.submittedTranscript);
         setMatchData(data);
       } catch (error) {
         console.error("Failed to fetch match:", error);
@@ -104,20 +116,17 @@ export default function MatchPage() {
   useEffect(() => {
     if (isFinished) return;
 
-    if (timeLeft <= 0) {
-      if (phaseIndex < PHASES.length - 1) {
+    const timer = setTimeout(() => {
+      if (timeLeft > 1) {
+        setTimeLeft((prev) => prev - 1);
+      } else if (phaseIndex < PHASES.length - 1) {
         const nextIndex = phaseIndex + 1;
         setPhaseIndex(nextIndex);
         setTimeLeft(PHASES[nextIndex].duration);
       } else {
+        setTimeLeft(0);
         setIsFinished(true);
       }
-
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      setTimeLeft((prev) => prev - 1);
     }, 1000);
 
     return () => clearTimeout(timer);
@@ -133,7 +142,10 @@ export default function MatchPage() {
           audio: true,
         });
 
-        if (!mounted) return;
+        if (!mounted) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
 
         localStreamRef.current = stream;
 
@@ -161,6 +173,12 @@ export default function MatchPage() {
       startedWebRTCRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (localVideoRef.current && localStreamRef.current) {
+      localVideoRef.current.srcObject = localStreamRef.current;
+    }
+  }, [loading, mediaReady]);
 
   function createPeerConnection(currentMatchId: string, myUserId: string) {
     const pc = new RTCPeerConnection({
@@ -199,7 +217,7 @@ export default function MatchPage() {
       if (!event.candidate) return;
 
       try {
-        await fetch("/api/webrtc/candidate", {
+        await authenticatedFetch("/api/webrtc/candidate", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -243,7 +261,7 @@ export default function MatchPage() {
         setConnectionStatus("connecting");
 
         if (isCaller) {
-          await fetch("/api/webrtc/reset", {
+          await authenticatedFetch("/api/webrtc/reset", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -263,7 +281,7 @@ export default function MatchPage() {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
 
-          await fetch("/api/webrtc/offer", {
+          await authenticatedFetch("/api/webrtc/offer", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -280,7 +298,7 @@ export default function MatchPage() {
           if (stopped) return;
 
           try {
-            const res = await fetch(
+            const res = await authenticatedFetch(
               `/api/webrtc/poll?matchId=${encodeURIComponent(
                 currentMatchId
               )}&otherUserId=${encodeURIComponent(otherUserId)}`
@@ -298,7 +316,7 @@ export default function MatchPage() {
               const answer = await pc.createAnswer();
               await pc.setLocalDescription(answer);
 
-              await fetch("/api/webrtc/answer", {
+              await authenticatedFetch("/api/webrtc/answer", {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
@@ -357,10 +375,16 @@ export default function MatchPage() {
 
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`/api/match/${matchData.id}`);
+        const res = await authenticatedFetch(`/api/match/${matchData.id}`);
         if (!res.ok) return;
 
         const data = await res.json();
+
+        if (data.submissionReceived) {
+          setSubmitted(true);
+          if (data.submittedTranscript) setTranscript(data.submittedTranscript);
+          setSubmissionError("");
+        }
 
         if (data.status === "ended") {
           window.location.href = `/result/${matchData.id}`;
@@ -388,6 +412,7 @@ export default function MatchPage() {
   }
 
   async function handleSubmitDebate() {
+    if (submitted || ending) return;
     if (!matchData?.id) {
       alert("Match not loaded yet. Try again.");
       return;
@@ -405,15 +430,15 @@ export default function MatchPage() {
 
     try {
       setEnding(true);
+      setSubmissionError("");
 
-      const res = await fetch("/api/match/end", {
+      const res = await authenticatedFetch("/api/match/end", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
           matchId: matchData.id,
-          userId,
           transcript,
         }),
       });
@@ -421,7 +446,7 @@ export default function MatchPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        alert(data.error || "Failed to end match.");
+        setSubmissionError(data.error || "Failed to submit the debate. Please try again.");
         setEnding(false);
         return;
       }
@@ -435,7 +460,7 @@ export default function MatchPage() {
       }
 
       if (data.status === "waiting") {
-        alert("Your debate was submitted. Waiting for the other player.");
+        setSubmitted(true);
         setEnding(false);
         return;
       }
@@ -444,7 +469,7 @@ export default function MatchPage() {
     } catch (error) {
       console.error("Submit debate error:", error);
       setEnding(false);
-      alert("Something went wrong submitting the debate.");
+      setSubmissionError("Unable to submit the debate. Check your connection and try again.");
     }
   }
 
@@ -637,18 +662,32 @@ export default function MatchPage() {
               <textarea
                 value={transcript}
                 onChange={(e) => setTranscript(e.target.value)}
+                disabled={submitted || ending}
+                maxLength={20000}
                 placeholder="Paste or write your side of the debate here..."
-                className="mt-3 h-40 w-full rounded-xl border px-4 py-3 outline-none focus:border-black"
+                className="mt-3 h-40 w-full rounded-xl border px-4 py-3 outline-none focus:border-black disabled:bg-gray-100"
               />
+              <p className="mt-2 text-sm text-gray-600">
+                {submitted ? "Your response is saved." : "Review your response before submitting. Your first submission is final."}
+              </p>
             </div>
+
+            {submitted && (
+              <p role="status" className="mt-4 rounded-xl border bg-gray-50 p-4">
+                Debate submitted. Waiting for your opponent. The result will open automatically when both responses are in.
+              </p>
+            )}
+            {submissionError && (
+              <p role="alert" className="mt-4 text-red-700">{submissionError}</p>
+            )}
 
             <div className="mt-8 flex flex-wrap gap-4">
               <button
                 onClick={handleSubmitDebate}
-                disabled={ending || !transcript.trim() || !matchData}
+                disabled={submitted || ending || !transcript.trim() || !matchData}
                 className="rounded-lg bg-black px-6 py-3 text-white disabled:opacity-50"
               >
-                {ending ? "Submitting..." : "Submit Debate"}
+                {submitted ? "Submitted" : ending ? "Submitting..." : "Submit Debate"}
               </button>
 
               <Link

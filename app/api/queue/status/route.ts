@@ -1,10 +1,13 @@
+import { authenticate } from "@/lib/server-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const userId = String(searchParams.get("userId") || "").trim();
+    const auth = await authenticate(req);
+    if (auth.response) return auth.response;
+    const userId = auth.userId;
+
 
     if (!userId) {
       return NextResponse.json({ error: "Missing userId" }, { status: 400 });
