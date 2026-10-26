@@ -34,6 +34,7 @@ function createRedis() {
   const requester: Requester = {
     async request<TResult>({ body }: UpstashRequest) {
       const [command, ...args] = body as [string, ...(string | number)[]];
+      if (tcp.status === "end") await tcp.connect();
       const result = await tcp.call(command, ...args);
       return { result: result as TResult };
     },

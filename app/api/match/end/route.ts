@@ -1,5 +1,6 @@
 import { authenticate, authorizeMatch } from "@/lib/server-auth";
 import { NextRequest, NextResponse } from "next/server";
+import { JUDGING_QUEUE, JUDGING_JOB_PREFIX } from "@/lib/judging-jobs";
 import { redis } from "@/lib/redis";
 import {
   MATCH_COMPLETION_SCRIPT,
@@ -20,7 +21,8 @@ export async function POST(req: NextRequest) {
     const values = body as Record<string, unknown>;
     const matchId = typeof values.matchId === "string" ? values.matchId.trim() : "";
     const transcript = typeof values.transcript === "string" ? values.transcript.trim() : "";
-    if (!matchId || !transcript) {
+    const useSavedTranscript = values.useSavedTranscript === true;
+    if (!matchId || (!transcript && !useSavedTranscript)) {
       return NextResponse.json(
         { error: "A match ID and debate transcript are required" },
         { status: 400 }
@@ -52,12 +54,16 @@ export async function POST(req: NextRequest) {
         `result:${matchId}`,
         `user:${match.player1.userId}:match`,
         `user:${match.player2.userId}:match`,
+        JUDGING_QUEUE,
+        `${JUDGING_JOB_PREFIX}${matchId}`,
+        `match:${matchId}:transcript`,
       ],
       [
         userId,
         JSON.stringify({ userId, transcript, transcriptLength: transcript.length, submittedAt: now }),
         now,
         `/result/${matchId}`,
+        useSavedTranscript ? "captured" : "manual",
       ]
     );
     const { statusCode, ...response } = outcome;

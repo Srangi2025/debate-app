@@ -28,6 +28,7 @@ async function fixture(t) {
   const keys = [
     `match:${id}`, `match:${id}:submissions`, `result:${id}`,
     `user:${player1.userId}:match`, `user:${player2.userId}:match`,
+    `${id}:judging-queue`, `${id}:judging-job`,
   ];
   t.after(() => redis.del(...keys));
   await redis.set(keys[0], { id, player1, player2, topics: ["ai-harm"], status: "active", createdAt: Date.now() });
@@ -48,13 +49,15 @@ test("first submission waits, retries preserve it, and the second produces a sha
   const saved = await redis.hget(f.keys[1], f.player1.userId);
   assert.equal(typeof saved, "object", "SDK HGET already deserializes JSON");
   assert.equal(saved.transcript, "First response");
-  assert.equal((await f.submit(f.player2.userId, "A substantially longer second response")).status, "completed");
+  assert.equal((await f.submit(f.player2.userId, "A substantially longer second response")).status, "pending_judgment");
   const result = await redis.get(f.keys[2]);
-  assert.equal(result.winner.userId, f.player2.userId);
-  assert.equal(result.judgeMethod, "response-length");
-  assert.match(result.judgeReason, /Argument quality was not evaluated/);
-  assert.equal((await redis.get(f.keys[0])).status, "ended");
-  assert.ok(await tcp.ttl(f.keys[1]) > 0, "Completed submissions have a cleanup expiry");
+  assert.equal(result.winner, null);
+  assert.equal(result.judgeMethod, "qwen-ai");
+  assert.equal(result.status, "pending_judgment");
+  assert.equal((await redis.get(f.keys[6])).status, "queued");
+  assert.equal(await redis.zscore(f.keys[5], f.id) !== null, true, "Accepted submissions must publish a durable job");
+  assert.equal((await redis.get(f.keys[0])).status, "pending_judgment");
+  assert.equal(await tcp.ttl(f.keys[1]), -1, "Pending evidence must survive a judge outage");
   assert.equal(await redis.get(f.keys[3]), null);
   assert.equal(await redis.get(f.keys[4]), null);
 });
@@ -67,13 +70,16 @@ test("simultaneous submissions and retries leave one stable result", async (t) =
     f.submit(f.player1.userId, "Short", 300),
     f.submit(f.player2.userId, "A much longer response", 400),
   ]);
-  assert.ok(replies.some(r => r.status === "completed"));
+  assert.ok(replies.some(r => r.status === "pending_judgment"));
   const result = await redis.get(f.keys[2]);
   const submissions = await redis.hgetall(f.keys[1]);
+  const job = await redis.get(f.keys[6]);
   const retry = await f.submit(f.player1.userId, "Changed after completion", 500);
   assert.equal(retry.alreadyCompleted, true);
   assert.deepEqual(await redis.get(f.keys[2]), result);
   assert.deepEqual(await redis.hgetall(f.keys[1]), submissions);
+  assert.deepEqual(await redis.get(f.keys[6]), job, "Submission retries must not replace a judging job");
+  assert.equal(await redis.zcard(f.keys[5]), 1);
 });
 
 test("unrelated players cannot submit or complete the match", async (t) => {
@@ -93,15 +99,16 @@ test("completion and old-match retries preserve a newer active match", async (t)
   assert.equal(await redis.get(f.keys[3]), "newer-active-match");
 });
 
-test("older submissions and Unicode text retain the existing length rules", async (t) => {
+test("older submissions and Unicode text are preserved for AI judging", async (t) => {
   const f = await fixture(t);
   await redis.hset(f.keys[1], {
     [f.player1.userId]: JSON.stringify({ userId: f.player1.userId, transcript: "😀", submittedAt: 1 }),
   });
   await f.submit(f.player2.userId, "ab");
   const result = await redis.get(f.keys[2]);
-  assert.equal(result.winner.userId, f.player1.userId);
-  assert.match(result.judgeReason, /equal length/);
+  assert.equal(result.winner, null);
+  assert.equal(result.status, "pending_judgment");
+  assert.equal((await redis.hget(f.keys[1], f.player1.userId)).transcript, "😀");
 });
 
 test("missing or incomplete matches produce explicit errors", async (t) => {

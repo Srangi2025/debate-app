@@ -3,13 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "node scripts/dev.mjs",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "test:matches": "node --test tests/match-completion.test.mjs"
+    "test:matches": "node --test tests/match-completion.test.mjs",
+    "test:matchmaking": "node --test tests/matchmaking.test.mjs tests/match-lifecycle.test.mjs",
+    "dev:web": "next dev --webpack",
+    "judge:worker": "node scripts/judge-worker.mjs",
+    "test:judging": "node --test tests/judging-jobs.test.mjs",
+    "test:transcript": "node --test tests/transcript.test.mjs",
+    "test:live": "node --test tests/live-feedback.test.mjs",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
+    "@next/env": "16.3.8",
     "@supabase/supabase-js": "^2.117.2",
     "@upstash/redis": "^1.37.0",
     "ioredis": "^5.10.1",
@@ -26,5 +34,8 @@
     "eslint-config-next": "^16.3.8",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=22.18.0"
   }
 }

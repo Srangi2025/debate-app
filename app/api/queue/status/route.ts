@@ -2,7 +2,6 @@ import { authenticate } from "@/lib/server-auth";
 import { NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 import { QUEUE_SCRIPT, type QueueResponse } from "@/lib/matchmaking";
-import { normalizeTopics, TOPICS } from "@/lib/topics";
 
 export async function GET(req: Request) {
   try {

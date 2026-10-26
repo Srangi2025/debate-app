@@ -22,6 +22,10 @@
 
 # misc
 .DS_Store
+/ai-service/.models/
+/ai-service/.venv/
+__pycache__/
+.pytest_cache/
 *.pem
 
 # debug
@@ -31,8 +35,8 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # env files (can opt-in for committing if needed)
-.env.local
-.env
+.env*
+!.env.example
 
 # vercel
 .vercel
@@ -40,3 +44,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Local backups, datasets, model artifacts, and evaluation outputs
+/backups/
+/ai-service/app-backup/
+*.bak
+*.backup.ts
+/ai-service/data/
+/ai-service/artifacts/
+/ai-service/adapters/
+/ai-service/fused_model/

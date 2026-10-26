@@ -3,8 +3,9 @@
 import { authenticatedFetch, getGuestSession } from "@/lib/guest-auth";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { TOPICS } from "@/lib/topics";
+import { LiveTranscript, type TranscriptController } from "@/app/components/LiveTranscript";
 
 type Player = {
   userId: string;
@@ -47,14 +48,24 @@ export default function MatchPage() {
   const params = useParams();
   const matchId = Array.isArray(params.id) ? params.id[0] : params.id;
 
+  return <MatchRoom key={matchId} matchId={matchId} />;
+}
+
+function MatchRoom({ matchId }: { matchId: string | undefined }) {
+  const router = useRouter();
+
   const [userId, setUserId] = useState("");
   const [matchData, setMatchData] = useState<MatchResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [ending, setEnding] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submissionError, setSubmissionError] = useState("");
-  const [transcript, setTranscript] = useState("");
+  const [roomEnded, setRoomEnded] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const [transcriptReady, setTranscriptReady] = useState(false);
+  const transcriptController = useRef<TranscriptController>(null);
   const [mediaReady, setMediaReady] = useState(false);
+  const [localMediaStream, setLocalMediaStream] = useState<MediaStream | null>(null);
 
   const [connectionStatus, setConnectionStatus] = useState<
     "idle" | "connecting" | "connected" | "disconnected" | "failed"
@@ -76,6 +87,8 @@ export default function MatchPage() {
   const startedWebRTCRef = useRef(false);
 
   const currentPhase = useMemo(() => PHASES[phaseIndex], [phaseIndex]);
+  const roomId = matchData?.id;
+  const createdAt = matchData?.createdAt;
 
   useEffect(() => {
     let active = true;
@@ -100,8 +113,13 @@ export default function MatchPage() {
         }
 
         const data: MatchResponse = await res.json();
+        if (["ended", "pending_judgment", "judging"].includes(data.status)) {
+          router.replace(`/result/${matchId}`);
+          return;
+        }
+        if (data.status === "abandoned") setRoomEnded(true);
         setSubmitted(Boolean(data.submissionReceived));
-        if (data.submittedTranscript) setTranscript(data.submittedTranscript);
+        if (data.submissionReceived) setTranscriptReady(true);
         setMatchData(data);
       } catch (error) {
         console.error("Failed to fetch match:", error);
@@ -111,28 +129,33 @@ export default function MatchPage() {
     }
 
     fetchMatch();
-  }, [matchId]);
+  }, [matchId, router]);
 
   useEffect(() => {
-    if (isFinished) return;
-
-    const timer = setTimeout(() => {
-      if (timeLeft > 1) {
-        setTimeLeft((prev) => prev - 1);
-      } else if (phaseIndex < PHASES.length - 1) {
-        const nextIndex = phaseIndex + 1;
-        setPhaseIndex(nextIndex);
-        setTimeLeft(PHASES[nextIndex].duration);
-      } else {
-        setTimeLeft(0);
-        setIsFinished(true);
+    if (!createdAt || roomEnded) return;
+    // Both browsers use the room's start time, including after a refresh.
+    const updateClock = () => {
+      let elapsed = Math.max(0, Math.floor((Date.now() - createdAt) / 1000));
+      for (let index = 0; index < PHASES.length; index++) {
+        if (elapsed < PHASES[index].duration) {
+          setPhaseIndex(index);
+          setTimeLeft(PHASES[index].duration - elapsed);
+          setIsFinished(false);
+          return;
+        }
+        elapsed -= PHASES[index].duration;
       }
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, [timeLeft, phaseIndex, isFinished]);
+      setPhaseIndex(PHASES.length - 1);
+      setTimeLeft(0);
+      setIsFinished(true);
+    };
+    const initial = setTimeout(updateClock, 0);
+    const timer = setInterval(updateClock, 1000);
+    return () => { clearTimeout(initial); clearInterval(timer); };
+  }, [createdAt, roomEnded]);
 
   useEffect(() => {
+    if (!roomId || roomEnded) return;
     let mounted = true;
 
     async function setupMedia() {
@@ -148,6 +171,7 @@ export default function MatchPage() {
         }
 
         localStreamRef.current = stream;
+        setLocalMediaStream(stream);
 
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
@@ -172,7 +196,7 @@ export default function MatchPage() {
       pcRef.current = null;
       startedWebRTCRef.current = false;
     };
-  }, []);
+  }, [roomId, roomEnded]);
 
   useEffect(() => {
     if (localVideoRef.current && localStreamRef.current) {
@@ -237,7 +261,7 @@ export default function MatchPage() {
   }
 
   useEffect(() => {
-    if (!matchData || !mediaReady || !userId) return;
+    if (!matchData || !mediaReady || !userId || roomEnded) return;
     if (startedWebRTCRef.current) return;
 
     const otherUserId =
@@ -335,6 +359,7 @@ export default function MatchPage() {
               );
             }
 
+            if (!pc.currentRemoteDescription) return;
             for (const candidate of data.candidates || []) {
               const key = JSON.stringify(candidate);
               if (processedCandidatesRef.current.has(key)) continue;
@@ -368,34 +393,63 @@ export default function MatchPage() {
       startedWebRTCRef.current = false;
       setConnectionStatus("disconnected");
     };
-  }, [matchData, mediaReady, userId]);
+  }, [matchData, mediaReady, userId, roomEnded]);
 
   useEffect(() => {
-    if (!matchData || ending) return;
-
+    if (!matchData || roomEnded) return;
+    let active = true;
+    let fetching = false;
     const interval = setInterval(async () => {
+      if (!active || fetching) return;
+      fetching = true;
       try {
         const res = await authenticatedFetch(`/api/match/${matchData.id}`);
-        if (!res.ok) return;
-
         const data = await res.json();
-
+        if (!active) return;
+        if (!res.ok) {
+          setSubmissionError(data.error || "Unable to refresh the match. Retrying...");
+          return;
+        }
+        if (data.status === "abandoned") {
+          setRoomEnded(true);
+          return;
+        }
         if (data.submissionReceived) {
           setSubmitted(true);
-          if (data.submittedTranscript) setTranscript(data.submittedTranscript);
+          if (data.submissionReceived) setTranscriptReady(true);
           setSubmissionError("");
         }
-
-        if (data.status === "ended") {
-          window.location.href = `/result/${matchData.id}`;
+        if (["ended", "pending_judgment", "judging"].includes(data.status)) {
+          router.replace(`/result/${matchData.id}`);
         }
       } catch (error) {
         console.error("Match status poll error:", error);
+      } finally {
+        fetching = false;
       }
     }, 2000);
+    return () => { active = false; clearInterval(interval); };
+  }, [matchData, roomEnded, router]);
 
-    return () => clearInterval(interval);
-  }, [matchData, ending]);
+  async function handleLeaveMatch(findNext = false) {
+    if (!matchData || leaving) return;
+    setLeaving(true);
+    setSubmissionError("");
+    try {
+      const res = await authenticatedFetch("/api/match/leave", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matchId: matchData.id }),
+      });
+      if (!res.ok) throw new Error("Unable to leave the match. Please retry.");
+      router.replace(findNext
+        ? `/queue?topics=${encodeURIComponent(matchData.topics.join(","))}`
+        : "/dashboard");
+    } catch (error) {
+      setSubmissionError(error instanceof Error ? error.message : "Unable to leave the match.");
+      setLeaving(false);
+    }
+  }
 
   function toggleMic() {
     localStreamRef.current?.getAudioTracks().forEach((track) => {
@@ -423,14 +477,11 @@ export default function MatchPage() {
       return;
     }
 
-    if (!transcript.trim()) {
-      alert("Please enter your debate transcript.");
-      return;
-    }
-
     try {
       setEnding(true);
       setSubmissionError("");
+      if (!transcriptController.current) throw new Error("The transcript is still loading. Please try again.");
+      await transcriptController.current.prepareSubmission();
 
       const res = await authenticatedFetch("/api/match/end", {
         method: "POST",
@@ -439,7 +490,7 @@ export default function MatchPage() {
         },
         body: JSON.stringify({
           matchId: matchData.id,
-          transcript,
+          useSavedTranscript: true,
         }),
       });
 
@@ -451,13 +502,19 @@ export default function MatchPage() {
         return;
       }
 
+
       if (
         data?.resultUrl &&
-        (data.status === "completed" || data.alreadyCompleted)
+        (
+          data.status === "completed" ||
+          data.status === "pending_judgment" ||
+          data.alreadyCompleted
+        )
       ) {
-        window.location.href = data.resultUrl;
+        router.replace(`/result/${matchData.id}`);
         return;
       }
+
 
       if (data.status === "waiting") {
         setSubmitted(true);
@@ -469,7 +526,7 @@ export default function MatchPage() {
     } catch (error) {
       console.error("Submit debate error:", error);
       setEnding(false);
-      setSubmissionError("Unable to submit the debate. Check your connection and try again.");
+      setSubmissionError(error instanceof Error ? error.message : "Unable to submit the debate. Check your connection and try again.");
     }
   }
 
@@ -494,6 +551,22 @@ export default function MatchPage() {
           >
             Back to Dashboard
           </Link>
+        </div>
+      </main>
+    );
+  }
+
+  if (roomEnded) {
+    return (
+      <main className="min-h-screen bg-white px-6 py-10 text-black">
+        <div className="mx-auto max-w-3xl rounded-2xl border p-8">
+          <h1 className="text-3xl font-bold">Your opponent left the debate</h1>
+          <p className="mt-3 text-gray-600">This room has closed. You can find another opponent with the same topics.</p>
+          {submissionError && <p role="alert" className="mt-4 text-red-600">{submissionError}</p>}
+          <div className="mt-6 flex gap-4">
+            <button disabled={leaving} onClick={() => handleLeaveMatch(true)} className="rounded-lg bg-black px-6 py-3 text-white disabled:opacity-50">Find Next Opponent</button>
+            <Link href="/dashboard" className="rounded-lg border px-6 py-3">Dashboard</Link>
+          </div>
         </div>
       </main>
     );
@@ -654,23 +727,17 @@ export default function MatchPage() {
               </button>
             </div>
 
-            <div className="mt-8 rounded-xl border p-6">
-              <p className="text-sm uppercase tracking-wide text-gray-500">
-                Debate Transcript / Summary
-              </p>
-
-              <textarea
-                value={transcript}
-                onChange={(e) => setTranscript(e.target.value)}
-                disabled={submitted || ending}
-                maxLength={20000}
-                placeholder="Paste or write your side of the debate here..."
-                className="mt-3 h-40 w-full rounded-xl border px-4 py-3 outline-none focus:border-black disabled:bg-gray-100"
-              />
-              <p className="mt-2 text-sm text-gray-600">
-                {submitted ? "Your response is saved." : "Review your response before submitting. Your first submission is final."}
-              </p>
-            </div>
+            {userId && <LiveTranscript
+              key={`${matchData.id}:${userId}`}
+              matchId={matchData.id}
+              userId={userId}
+              audioStream={localMediaStream}
+              micEnabled={micEnabled}
+              submitted={submitted}
+              disabled={ending || leaving || roomEnded}
+              controllerRef={transcriptController}
+              onContentChange={setTranscriptReady}
+            />}
 
             {submitted && (
               <p role="status" className="mt-4 rounded-xl border bg-gray-50 p-4">
@@ -684,18 +751,16 @@ export default function MatchPage() {
             <div className="mt-8 flex flex-wrap gap-4">
               <button
                 onClick={handleSubmitDebate}
-                disabled={submitted || ending || !transcript.trim() || !matchData}
+                disabled={submitted || ending || !transcriptReady || !matchData}
                 className="rounded-lg bg-black px-6 py-3 text-white disabled:opacity-50"
               >
                 {submitted ? "Submitted" : ending ? "Submitting..." : "Submit Debate"}
               </button>
 
-              <Link
-                href="/dashboard"
-                className="rounded-lg border px-6 py-3 text-black"
-              >
-                Leave Match
-              </Link>
+              <button onClick={() => handleLeaveMatch(true)} disabled={leaving} className="rounded-lg border px-6 py-3 disabled:opacity-50">
+                {leaving ? "Leaving..." : "Next Opponent"}
+              </button>
+              <button onClick={() => handleLeaveMatch()} disabled={leaving} className="rounded-lg border px-6 py-3 disabled:opacity-50">Leave Match</button>
             </div>
           </div>
 

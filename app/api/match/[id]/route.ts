@@ -1,6 +1,8 @@
 import { authenticate, authorizeMatch } from "@/lib/server-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
+import { MATCH_LIFECYCLE_SCRIPT } from "@/lib/match-lifecycle";
+import type { MatchRecord } from "@/lib/server-auth";
 
 export async function GET(
   req: NextRequest,
@@ -19,9 +21,15 @@ export async function GET(
 
     const access = await authorizeMatch(id, userId);
     if (access.response) return access.response;
+    const outcome = await redis.eval<unknown[], { match?: MatchRecord; error?: string; statusCode?: number }>(
+      MATCH_LIFECYCLE_SCRIPT,
+      [`match:${id}`, `user:${access.match.player1?.userId}:match`, `user:${access.match.player2?.userId}:match`],
+      [userId, Date.now(), "heartbeat"]
+    );
+    if (!outcome.match) return NextResponse.json({ error: outcome.error }, { status: outcome.statusCode ?? 500 });
     const submission = await redis.hget<{ transcript: string }>(`match:${id}:submissions`, userId);
     return NextResponse.json({
-      ...access.match,
+      ...outcome.match,
       submissionReceived: !!submission,
       submittedTranscript: submission?.transcript,
     });
