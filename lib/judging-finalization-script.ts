@@ -55,6 +55,11 @@ result.scores = judgment.scores
 result.weightedScores = judgment.weighted_scores
 result.strengths = judgment.strengths
 result.improvements = judgment.improvements
+-- Preserve the validated JSON verbatim: Lua cjson otherwise converts [] to {}.
+result.judgmentJson = ARGV[2]
+if judgment.source_checks then result.sourceChecks = judgment.source_checks end
+if judgment.evidence_used then result.evidenceUsed = judgment.evidence_used end
+if judgment.review then result.review = judgment.review end
 
 if judgment.winner == 'A' then
   result.winner = match.player1

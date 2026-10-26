@@ -101,13 +101,19 @@ def main():
     check.add_argument("--debates", type=Path, default=Path("evaluation/smoke-debates.jsonl"))
     check.add_argument("--facts", type=Path)
     check.add_argument("--output", type=Path, required=True)
+    check.add_argument("--offline-evidence", action="store_true", help="Disable final-judge network retrieval; frozen live-fact fixtures still run")
     args = parser.parse_args()
     if args.command == "prepare":
         print(json.dumps(prepare(args.input, args.output, args.seed), indent=2))
     else:
         if args.output.exists():
             parser.error("Use a new report path to preserve previous model runs")
-        result = asyncio.run(evaluate(args.debates, args.facts))
+        async def no_sources(_query):
+            return [], "no_results"
+        async def offline_judge(request):
+            return await evaluate_debate(request, retrieve=no_sources)
+        result = asyncio.run(evaluate(args.debates, args.facts, **({"judge": offline_judge} if args.offline_evidence else {})))
+        result["final_evidence_mode"] = "disabled" if args.offline_evidence else "live_retrieval"
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(result, indent=2) + "\n")
         print(json.dumps({key: result[key] for key in ("model", "judging", "facts", "warning")}, indent=2))

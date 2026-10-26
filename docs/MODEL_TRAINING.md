@@ -10,7 +10,7 @@ Qwen’s [model card](https://huggingface.co/Qwen/Qwen3.5-4B) describes the upst
 
 ## Measured baseline: 2026-10-25
 
-A real local-model run used the committed synthetic smoke fixtures:
+A real local-model run of the original v1 judge used the committed synthetic smoke fixtures (these are historical results, not a benchmark of the new v2 final judge):
 
 | Measurement | Observed result | Scope |
 | --- | --- | --- |
@@ -33,10 +33,11 @@ With Ollama and the configured model running, from `ai-service`:
 .venv/bin/python -m evaluation.run evaluate \
   --debates evaluation/smoke-debates.jsonl \
   --facts evaluation/smoke-facts.jsonl \
+  --offline-evidence \
   --output artifacts/baseline.json
 ```
 
-Choose a fresh report path for each run; existing reports are not overwritten. Inference runs directly through the same Python functions used by the API. Fact cases inject a frozen evidence bundle while retaining the real extraction/assessment model calls. This isolates model behavior from network drift; a separate evaluation against real retrieval is still needed.
+Choose a fresh report path for each run; existing reports are not overwritten. Inference runs directly through the same Python functions used by the API. Fact cases inject a frozen evidence bundle while retaining the real extraction/assessment model calls. This isolates live-check model behavior from network drift. `--offline-evidence` separately disables the final judge’s new network retrieval; omit it for end-to-end fresh retrieval tests. Record this choice when comparing reports.
 
 CLI commands read shell environment, not Uvicorn’s `--env-file` setting. For a different installed Ollama candidate:
 
@@ -125,6 +126,6 @@ There is no user-approved numeric accuracy target yet. Establish targets from re
 - Transcription error and speaker-attribution evaluation, plus downstream judgment sensitivity to recognition errors.
 - End-to-end latency, timeouts, output validity, worker recovery, and resource use under expected concurrency.
 
-Two current release gaps are explicit: final judging does not ingest live evidence cards, and its 4,096-token context can be smaller than accepted maximum transcripts. Full-debate token budgeting/chunking and source-aware final evaluation need implementation and dedicated tests. Until then, avoid claiming the final winner is a verified factual truth assessment of every spoken claim.
+The v2 final judge now uses bounded section reviews and fresh source checks, described in [final judging](FINAL_JUDGING.md). It does not trust cached live cards as truth. Long debates use summaries, and at most two factual claims per side are checked. Validate summary fidelity, claim selection, source interpretation, and downstream rubric behavior on independent human-labelled cases before claiming accuracy. A final winner is not a verified truth assessment of every spoken claim.
 
 Do not promote based solely on the committed smoke cases. Keep a dated model card/report listing provenance, splits, actual metrics, failure examples, serving artifact/version, and known limits for each candidate.

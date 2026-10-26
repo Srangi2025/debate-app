@@ -100,10 +100,26 @@ quality work. Checks are provisional and explicitly labelled as such in the UI.
 
 The initial synthetic smoke run passes 3/3 winner cases and swaps, and 4/5 factual
 kind/verdict cases. This is not a human accuracy benchmark. Human-labelled data,
-fine-tuning/runtime compatibility, long-transcript context handling, and evidence
-integration into final judging remain open. See [the model workflow](MODEL_TRAINING.md).
+fine-tuning/runtime compatibility, and a held-out quality benchmark remain open.
+See [the model workflow](MODEL_TRAINING.md).
 
-## 5. History, accounts, and rankings — awaiting approval
+## 4b. AI quality improvements — complete locally; commit approval pending
+
+- Review every section of long frozen transcripts using bounded prompts; label
+  summary-based final scoring and preserve original text in storage.
+- Recheck selected factual claims against fresh sources for final scoring, with
+  inspectable quotations and explicit uncertainty.
+- Renew worker leases during longer inference and reject stale finalization.
+- Add regression and real-model checks; keep changes uncommitted pending review.
+
+Verified with 50 Node integration tests, 40 Python tests, TypeScript, lint, the
+production build, real-model short/long examples, and a live-source worker/browser
+flow including participant authorization and result recovery. Human-reviewed
+accuracy evaluation and custom training remain open.
+
+See [final judging details](FINAL_JUDGING.md).
+
+## 5. History, accounts, and rankings — next after AI quality review
 
 - Add durable match history and inspectable transcripts/results.
 - Define account identity and guest-to-account migration.
@@ -119,3 +135,11 @@ integration into final judging remain open. See [the model workflow](MODEL_TRAIN
 
 Local correctness tests establish behavior; they do not establish public-service
 capacity or connectivity across arbitrary networks.
+
+## GitHub checkpoints
+
+During active work, prepare a working checkpoint about every 30 minutes and at
+completed phase boundaries. State the current phase, validation results, scope,
+and proposed commit message, then wait for the owner to approve or refine it
+before committing and pushing. Do not create broken commits to meet the clock.
+Both author and committer are Sai Rangi <srangi2025@gmail.com>; no GPT coauthor.

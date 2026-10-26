@@ -4,7 +4,7 @@ import { evaluateDebate, isAIJudgeResult, type AIJudgeResult } from "./judge-cli
 import { FINALIZE_JUDGMENT_SCRIPT } from "./judging-finalization-script.ts";
 import { TOPICS } from "./topics.ts";
 import {
-  CLAIM_JUDGING_SCRIPT, SETTLE_JUDGING_SCRIPT, JOB_LEASE_MS,
+  CLAIM_JUDGING_SCRIPT, SETTLE_JUDGING_SCRIPT, RENEW_JUDGING_SCRIPT, JOB_LEASE_MS,
   JUDGING_JOB_PREFIX, JUDGING_QUEUE, MAX_JUDGING_ATTEMPTS, type JudgingJob,
 } from "./judging-jobs.ts";
 
@@ -20,7 +20,8 @@ type Options = {
   queueKey?: string;
   jobPrefix?: string;
   now?: () => number;
-  evaluate?: (topic: string, a: string, b: string) => Promise<AIJudgeResult>;
+  evaluate?: (topic: string, a: string, b: string, signal?: AbortSignal) => Promise<AIJudgeResult>;
+  renewIntervalMs?: number;
 };
 
 // One claimed job per call; multiple worker processes share Redis ownership.
@@ -36,6 +37,22 @@ export async function processNextJudgment(redis: Store, options: Options = {}) {
   if (!job) return false;
 
   let outcome = "failed";
+  const controller = new AbortController();
+  let renewal: Promise<void> | undefined;
+  const renewTimer = setInterval(() => {
+    if (renewal || outcome === "completed") return;
+    renewal = (async () => {
+      try {
+        const renewed = await redis.eval(RENEW_JUDGING_SCRIPT,
+          [queueKey, `${jobPrefix}${job.matchId}`, `match:${job.matchId}:judging-lock`],
+          [job.matchId, token, now(), JOB_LEASE_MS]);
+        if (renewed !== 1) controller.abort(new Error("Judging lease was lost"));
+      } catch {
+        controller.abort(new Error("Judging lease could not be renewed"));
+      }
+    })().finally(() => { renewal = undefined; });
+  }, options.renewIntervalMs ?? JOB_LEASE_MS / 4);
+  renewTimer.unref();
   try {
     const [match, result] = await Promise.all([
       redis.get<Match>(`match:${job.matchId}`),
@@ -53,7 +70,8 @@ export async function processNextJudgment(redis: Store, options: Options = {}) {
       if (!a || !b || a.userId !== match.player1.userId || b.userId !== match.player2.userId ||
           !a.transcript?.trim() || !b.transcript?.trim()) throw new Error("Valid submissions from both participants are required");
       const topic = match.topics.map(id => TOPICS.find(topic => topic.id === id)?.title ?? id).join(", ") || "General debate";
-      const judgment = await (options.evaluate ?? evaluateDebate)(topic, a.transcript, b.transcript);
+      const judgment = await (options.evaluate ?? evaluateDebate)(topic, a.transcript, b.transcript, controller.signal);
+      controller.signal.throwIfAborted();
       if (!isAIJudgeResult(judgment)) throw new Error("Invalid response from AI judge");
       const finalized = await redis.eval<unknown[], { ok: boolean; reason?: string }>(
         FINALIZE_JUDGMENT_SCRIPT,
@@ -65,6 +83,9 @@ export async function processNextJudgment(redis: Store, options: Options = {}) {
     }
   } catch (error) {
     console.error(`[judge-worker] ${job.matchId}, attempt ${job.attempts}:`, error instanceof Error ? error.message : "Judging failed");
+  } finally {
+    clearInterval(renewTimer);
+    await renewal;
   }
 
   // If the process dies before this acknowledgement, the leased job remains

@@ -164,6 +164,7 @@ Uvicorn loads this file only when launched with `--env-file .env`. Python evalua
 | --- | --- |
 | `OLLAMA_URL` | `http://127.0.0.1:11434`; inference server |
 | `JUDGE_MODEL` | `qwen3.5:4b`; must already be installed in Ollama |
+| `JUDGE_CONTEXT_TOKENS` | `16384`; final-judge per-call budget, configurable from 8192 to 65536; larger values require more model memory |
 | `WHISPER_MODEL` | `base.en`; English speech model |
 | `WHISPER_MODEL_DIR` | `ai-service/.models`; speech cache |
 | `FACT_CHECK_USER_AGENT` | Descriptive prototype identifier; set a real application contact for deployment |
@@ -185,7 +186,7 @@ Speech capture is opt-in. The browser sends clips after a short pause or about e
 
 Pending contributions use an IndexedDB outbox with stable IDs and retry after refresh. Text drafts use localStorage. Successfully acknowledged audio is removed from browser storage. If storage is unavailable, keep the page open until saving completes. An unfinished clip can be lost if the page closes before the clip is created.
 
-The first final submission is immutable. The server assembles it from that participant’s saved contributions rather than trusting a browser-edited summary. After both submit, a saved job runs independently of the result page. Jobs have a four-minute ownership lease and up to five attempts with exponential delays; exhausted jobs expose **Retry AI Judging**. Token-checked finalization prevents stale workers from overwriting a result. One worker processes one job at a time; additional workers can share Redis.
+The first final submission is immutable. The server assembles it from that participant’s saved contributions rather than trusting a browser-edited summary. After both submit, a saved job runs independently of the result page. Jobs have a four-minute ownership lease, renewed by the owning worker every minute during inference, and up to five attempts with exponential delays; exhausted jobs expose **Retry AI Judging**. Token-checked finalization prevents stale workers from overwriting a result. One worker processes one job at a time; additional workers can share Redis.
 
 ### Rubric
 
@@ -198,7 +199,7 @@ The first final submission is immutable. The server assembles it from that parti
 
 The model returns integer scores from 0 to 10 and grounded explanations. The server computes weighted totals; a difference of at most 0.25 is a tie. Model output must satisfy the schema. Temperature zero reduces sampling variability but does not prove impartiality or correctness.
 
-**Current boundary:** final judging scores the submitted arguments; it does not currently incorporate live retrieved source cards into the final rubric input. The final model context is configured at 4,096 tokens, so maximum-length accepted transcripts may exceed it. Long-debate context handling and evidence-aware final judging must be validated before claiming full-length factual accuracy. Elo is available as a preview endpoint only; applied rating updates remain disabled.
+Final judging now reviews every transcript section and performs fresh source checks on up to two selected factual claims per side. The final scoring prompt receives those checked verdicts and actual source quotations. Short submissions fit verbatim; long debates use bounded, recursively compressed section reviews. Results show which path was used, the source cards, and checked claim IDs considered in scoring. Summaries can lose nuance, and most claims can remain unchecked. See [final judging details](docs/FINAL_JUDGING.md). Elo is available as a preview endpoint only; applied rating updates remain disabled.
 
 ### Live feedback and sources
 
@@ -284,10 +285,11 @@ From `ai-service`:
 # Requires local Ollama/model; does not need live Wikipedia access.
 .venv/bin/python -m evaluation.run evaluate \
   --facts evaluation/smoke-facts.jsonl \
+  --offline-evidence \
   --output artifacts/baseline.json
 ```
 
-Automated application/Python tests check implementation behavior, not model accuracy. The opt-in benchmark performs actual inference for judging, swapped speakers, and frozen-source factual checks. Synthetic smoke fixtures are explicitly labelled and rejected as human training data. Evaluation reports and private datasets are ignored by Git. Read [the model workflow](docs/MODEL_TRAINING.md) for human labels, leakage-resistant splits, supervised export, fine-tuning, and release criteria.
+Automated application/Python tests check implementation behavior, not model accuracy. The opt-in benchmark performs actual inference for judging, swapped speakers, and frozen-source factual checks. `--offline-evidence` disables final-judge network retrieval for reproducible offline runs; omit it to exercise fresh final retrieval as well. Synthetic smoke fixtures are explicitly labelled and rejected as human training data. Evaluation reports and private datasets are ignored by Git. Read [the model workflow](docs/MODEL_TRAINING.md) for human labels, leakage-resistant splits, supervised export, fine-tuning, and release criteria.
 
 GitHub Actions runs lint, application tests with Redis, Python tests, and the build. It does not download judge weights, train a model, or certify accuracy.
 

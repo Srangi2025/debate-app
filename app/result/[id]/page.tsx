@@ -6,6 +6,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { TOPICS } from "@/lib/topics";
+import { FinalEvidence } from "@/app/components/FinalEvidence";
+import type { FinalSourceCheck, ReviewCoverage } from "@/lib/judge-client";
 
 type Player = {
   userId: string;
@@ -31,6 +33,9 @@ type ResultResponse = {
   weightedScores?: Record<Side, number>;
   strengths?: Record<Side, string[]>;
   improvements?: Record<Side, string[]>;
+  sourceChecks?: FinalSourceCheck[];
+  evidenceUsed?: string[];
+  review?: ReviewCoverage;
   judgingJob?: {
     status: "queued" | "judging" | "retrying" | "failed" | "completed";
     attempts: number;
@@ -285,7 +290,7 @@ function MatchResult({ matchId }: { matchId: string }) {
               : resultData.workerOnline === false
                 ? "Both submissions are saved. Judging will resume when the AI judge reconnects."
                 : jobStatus === "judging"
-                  ? "Qwen is reviewing both arguments for logical reasoning, supporting evidence, rebuttals, and relevance."
+                  ? "The AI is reviewing both transcripts and checking selected factual claims against sources. Longer debates take more time."
                   : "Both submissions are saved. Your debate will be evaluated as soon as the AI judge is available."}
           </p>
 
@@ -523,6 +528,8 @@ function MatchResult({ matchId }: { matchId: string }) {
               </p>
             )}
           </div>
+
+          <FinalEvidence checks={resultData.sourceChecks} review={resultData.review} usedIds={resultData.evidenceUsed} />
 
           {/* Match Status */}
           <div className="mt-6 rounded-xl border p-5">

@@ -4,12 +4,13 @@ import { before, after, test } from "node:test";
 import IORedis from "ioredis";
 import { Redis } from "@upstash/redis";
 import {
-  ENQUEUE_JUDGING_SCRIPT, CLAIM_JUDGING_SCRIPT, SETTLE_JUDGING_SCRIPT,
+  ENQUEUE_JUDGING_SCRIPT, CLAIM_JUDGING_SCRIPT, SETTLE_JUDGING_SCRIPT, RENEW_JUDGING_SCRIPT,
   JOB_LEASE_MS, MAX_JUDGING_ATTEMPTS,
 } from "../lib/judging-jobs.ts";
 import { FINALIZE_JUDGMENT_SCRIPT } from "../lib/judging-finalization-script.ts";
 import { processNextJudgment } from "../lib/judging-worker.ts";
 import { isAIJudgeResult } from "../lib/judge-client.ts";
+import { resultPayload } from "../lib/result-payload.ts";
 
 const tcp = new IORedis(process.env.REDIS_TEST_URL || "redis://127.0.0.1:6379", {
   lazyConnect: true, maxRetriesPerRequest: 1, retryStrategy: () => null,
@@ -182,4 +183,85 @@ test("invalid model output is rejected without overwriting the pending result", 
   assert.equal(isAIJudgeResult(judgment), true);
   assert.equal(isAIJudgeResult({ ...judgment, weighted_scores: { A: "8", B: 5 } }), false);
   assert.equal(isAIJudgeResult({ ...judgment, scores: { A: { reasoning: 99 }, B: {} } }), false);
+  assert.equal(isAIJudgeResult({ ...judgment, winner: "B" }), false);
+  assert.equal(isAIJudgeResult({ ...judgment, weighted_scores: { A: 9, B: 5.7 } }), false);
+});
+
+test("long evaluations renew their schedule and only the current owner can extend a lease", async (t) => {
+  const f = await fixture(t);
+  await f.claim("owner");
+  f.clock.now += JOB_LEASE_MS - 1000;
+  const keys = [f.queueKey, `${f.jobPrefix}${f.id}`, `match:${f.id}:judging-lock`];
+  const renew = token => redis.eval(RENEW_JUDGING_SCRIPT, keys, [f.id, token, f.clock.now, JOB_LEASE_MS]);
+  assert.equal(await renew("owner"), 1);
+  assert.equal((await f.job()).nextAttemptAt, f.clock.now + JOB_LEASE_MS);
+  assert.ok(await tcp.pttl(keys[2]) > JOB_LEASE_MS - 1000);
+  const saved = await f.job();
+  assert.equal(await renew("stale"), 0);
+  assert.deepEqual(await f.job(), saved);
+  f.clock.now += 2000;
+  assert.equal(await processNextJudgment(redis, f.options), false, "Renewed work must not be reclaimed at its original deadline");
+});
+
+test("a running worker aborts after losing ownership without touching the new owner's job", { timeout: 5000 }, async (t) => {
+  const f = await fixture(t);
+  let entered;
+  const started = new Promise(resolve => { entered = resolve; });
+  const running = processNextJudgment(redis, { ...f.options, renewIntervalMs: 10, evaluate: async (_topic, _a, _b, signal) => {
+    entered();
+    await new Promise((resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+    return judgment;
+  } });
+  await started;
+  const replacement = { ...await f.job(), token: "new-owner" };
+  await redis.set(`${f.jobPrefix}${f.id}`, replacement);
+  await redis.set(`match:${f.id}:judging-lock`, "new-owner", { px: JOB_LEASE_MS });
+  await running;
+  assert.deepEqual(await f.job(), replacement);
+  assert.equal(await redis.get(`match:${f.id}:judging-lock`), "new-owner");
+  assert.equal((await redis.get(`result:${f.id}`)).status, "pending_judgment");
+});
+
+test("final evidence and coverage survive finalization and malformed evidence is rejected", async (t) => {
+  const f = await fixture(t);
+  const grounded = { ...judgment,
+    source_checks: [{ id: "F1", side: "A", quote: "A sourced claim.", verdict: "supported", reason: "The quoted source supports this claim.",
+      evidence: [{ title: "Triangle", url: "https://en.wikipedia.org/wiki/Triangle", provider: "Wikipedia", retrievedAt: "2026-10-25T00:00:00Z", quote: "A triangle has three sides." }] }],
+    evidence_used: ["F1"],
+    review: { mode: "summarized", characters: { A: 20000, B: 20000 }, chunks: { A: 4, B: 4 }, context_tokens: 16384, checked_claims: 1, candidate_claims: 2, warnings: ["The final score uses summaries."] },
+  };
+  assert.equal(isAIJudgeResult(grounded), true);
+  assert.equal(isAIJudgeResult({ ...grounded, evidence_used: ["FAKE"] }), false);
+  assert.equal(isAIJudgeResult({ ...grounded, evidence_used: [] }), false);
+  assert.equal(isAIJudgeResult({ ...grounded, source_checks: [{ ...grounded.source_checks[0], evidence: [] }] }), false);
+  assert.equal(isAIJudgeResult({ ...grounded, review: { ...grounded.review, checked_claims: 2 } }), false);
+  const injected = structuredClone(grounded);
+  injected.source_checks[0].evidence[0].url = "javascript:alert(1)";
+  assert.equal(isAIJudgeResult(injected), false);
+  await processNextJudgment(redis, { ...f.options, evaluate: async () => grounded });
+  const saved = await redis.get(`result:${f.id}`);
+  assert.deepEqual(saved.sourceChecks, grounded.source_checks);
+  assert.deepEqual(saved.evidenceUsed, ["F1"]);
+  assert.deepEqual(saved.review, grounded.review);
+});
+
+test("finished API payloads preserve empty evidence arrays for unverified and absent claims", async (t) => {
+  const f = await fixture(t, 2);
+  let calls = 0;
+  for (let index = 0; index < 2; index++) {
+    await processNextJudgment(redis, { ...f.options, evaluate: async () => {
+      const checks = calls++ === 0 ? [] : [{ id: "F1", side: "A", quote: "An unverified claim.", verdict: "unverified", reason: "No source was available.", evidence: [] }];
+      return { ...judgment, source_checks: checks, evidence_used: [],
+        review: { mode: "full", characters: { A: 20, B: 20 }, chunks: { A: 1, B: 1 }, context_tokens: 16384, checked_claims: checks.length, candidate_claims: checks.length, warnings: [] } };
+    } });
+  }
+  const results = await Promise.all(f.ids.map(async id => resultPayload(await redis.get(`result:${id}`))));
+  assert.deepEqual(results.map(result => result.sourceChecks.length).sort(), [0, 1]);
+  for (const result of results) {
+    assert.equal(result.status, "finished");
+    assert.equal("judgmentJson" in result, false);
+    assert.deepEqual(result.evidenceUsed, []);
+    assert.deepEqual(result.review.warnings, []);
+    for (const check of result.sourceChecks) assert.deepEqual(check.evidence, []);
+  }
 });

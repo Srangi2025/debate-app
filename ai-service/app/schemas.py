@@ -22,6 +22,34 @@ class JudgeEvaluation(BaseModel):
     strengths_b: list[str] = Field(default_factory=list, max_length=3)
     improvements_a: list[str] = Field(default_factory=list, max_length=3)
     improvements_b: list[str] = Field(default_factory=list, max_length=3)
+    evidence_used: list[str] = Field(default_factory=list, max_length=4)
+
+
+class FinalEvidence(BaseModel):
+    title: str
+    url: str
+    provider: str
+    retrievedAt: str
+    quote: str
+
+
+class FinalSourceCheck(BaseModel):
+    id: str
+    side: Literal["A", "B"]
+    quote: str
+    verdict: Literal["supported", "contradicted", "mixed", "unverified"]
+    reason: str
+    evidence: list[FinalEvidence]
+
+
+class ReviewCoverage(BaseModel):
+    mode: Literal["full", "summarized"]
+    characters: dict[str, int]
+    chunks: dict[str, int]
+    context_tokens: int
+    checked_claims: int
+    candidate_claims: int
+    warnings: list[str]
 
 class DebateResult(BaseModel):
     winner: Winner
@@ -32,6 +60,9 @@ class DebateResult(BaseModel):
     improvements: dict[str, list[str]]
     judge_version: str
     rubric_version: str
+    source_checks: list[FinalSourceCheck] = Field(default_factory=list)
+    evidence_used: list[str] = Field(default_factory=list)
+    review: ReviewCoverage | None = None
 
 class EloPreviewRequest(BaseModel):
     rating_a: float = Field(ge=0, le=10000)

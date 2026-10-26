@@ -4,6 +4,21 @@ export const JUDGING_HEARTBEAT = "judging:worker-heartbeat";
 export const JOB_LEASE_MS = 240_000;
 export const MAX_JUDGING_ATTEMPTS = 5;
 
+// Only the current owner can keep a long inference alive. A dead process stops
+// renewing; its scheduled lease still becomes reclaimable by another worker.
+export const RENEW_JUDGING_SCRIPT = `
+local raw = redis.call('GET', KEYS[2])
+if not raw or redis.call('GET', KEYS[3]) ~= ARGV[2] then return 0 end
+local job = cjson.decode(raw)
+if job.token ~= ARGV[2] or job.status ~= 'judging' then return 0 end
+job.updatedAt = tonumber(ARGV[3])
+job.nextAttemptAt = tonumber(ARGV[3]) + tonumber(ARGV[4])
+redis.call('PEXPIRE', KEYS[3], ARGV[4])
+redis.call('SET', KEYS[2], cjson.encode(job))
+redis.call('ZADD', KEYS[1], job.nextAttemptAt, ARGV[1])
+return 1
+`;
+
 export type JudgingJob = {
   matchId: string;
   status: "queued" | "judging" | "retrying" | "failed" | "completed";

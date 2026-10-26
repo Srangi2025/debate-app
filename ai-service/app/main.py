@@ -10,13 +10,13 @@ from .transcription import transcribe_wav, speech_model, MAX_AUDIO_BYTES, MODEL 
 from .live_schemas import LiveRequest
 from .live_feedback import analyze_live
 
-app = FastAPI(title="Debate AI Judge", version="0.2.0")
+app = FastAPI(title="Debate AI Judge", version="0.3.0")
 
 @app.post("/live-feedback")
 async def live_feedback(request: LiveRequest):
     try:
         return await analyze_live(request)
-    except (httpx.HTTPError, ValidationError, ValueError, KeyError, TypeError) as exc:
+    except (httpx.HTTPError, ValidationError, ValueError, KeyError, TypeError, TimeoutError) as exc:
         raise HTTPException(status_code=503, detail="Live feedback is temporarily unavailable") from exc
 
 @app.get("/transcription/health")
@@ -44,7 +44,7 @@ def health():
 async def judge(request: DebateRequest):
     try:
         return await evaluate_debate(request)
-    except (httpx.HTTPError, ValidationError, ValueError, KeyError, TypeError) as exc:
+    except (httpx.HTTPError, ValidationError, ValueError, KeyError, TypeError, TimeoutError) as exc:
         # Never expose raw model output or sensitive debate text in errors.
         raise HTTPException(status_code=502, detail="Judge inference or validation failed; check the server logs") from exc
 

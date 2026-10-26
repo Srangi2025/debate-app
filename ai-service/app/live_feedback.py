@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import httpx
-from .judge import MODEL, OLLAMA_URL
+from .model_client import MODEL, OLLAMA_URL
 from .live_schemas import LiveRequest, LiveExtraction, FactAssessments
 from .evidence import retrieve_sources
 

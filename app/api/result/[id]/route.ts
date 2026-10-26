@@ -2,6 +2,7 @@ import { authenticate, authorizeMatch } from "@/lib/server-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 import { JUDGING_JOB_PREFIX, JUDGING_HEARTBEAT, type JudgingJob } from "@/lib/judging-jobs";
+import { resultPayload } from "@/lib/result-payload";
 
 export async function GET(
   req: NextRequest,
@@ -37,7 +38,7 @@ export async function GET(
         workerOnline: !!worker,
       });
     }
-    return NextResponse.json(result);
+    return NextResponse.json(resultPayload(result));
   } catch (error) {
     console.error("result/[id] error", error);
     return NextResponse.json(
