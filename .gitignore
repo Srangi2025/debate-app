@@ -15,6 +15,13 @@
 
 # next.js
 /.next/
+/.next-*/
+/.tsconfig-*.json
+/data/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
 /out/
 
 # production

@@ -10,7 +10,7 @@ export async function POST(req: Request) {
     const result = await redis.eval(QUEUE_SCRIPT, [], [
       auth.userId!, Date.now(), "leave", "", "[]", crypto.randomUUID(), "",
     ]) as QueueResponse;
-    return NextResponse.json(result);
+    return NextResponse.json(result, { status: result.statusCode ?? 200 });
   } catch (error) {
     console.error("queue/leave error", error);
     return NextResponse.json({ error: "Unable to leave queue" }, { status: 500 });

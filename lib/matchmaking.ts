@@ -8,6 +8,9 @@ local prefix = ARGV[7]
 local rating = tonumber(ARGV[8]) or 1500
 local function userKey(id, suffix) return prefix .. 'user:' .. id .. ':' .. suffix end
 local function topicKey(topic) return prefix .. 'queue:topic:' .. topic end
+if redis.call('GET', prefix .. 'identity:' .. user .. ':retired') then
+  return cjson.encode({error='This guest identity is being imported. Reload to continue.',statusCode=409})
+end
 local function remove(id)
   local raw = redis.call('GET', userKey(id, 'queue'))
   if raw then
@@ -174,4 +177,4 @@ for _, topic in ipairs(topics) do redis.call('ZADD', topicKey(topic), joinedAt, 
 return cjson.encode({matched = false, queued = true})
 `;
 
-export type QueueResponse = { matched?: boolean; matchId?: string; queued?: boolean; ok?: boolean };
+export type QueueResponse = { matched?: boolean; matchId?: string; queued?: boolean; ok?: boolean; error?: string; statusCode?: number };

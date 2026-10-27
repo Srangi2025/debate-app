@@ -36,7 +36,7 @@ export async function POST(req: Request) {
       "",
       rating,
     ]) as QueueResponse;
-    return NextResponse.json(result);
+    return NextResponse.json(result, { status: result.statusCode ?? 200 });
   } catch (error) {
     console.error("queue/join error", error);
     return NextResponse.json({ error: "Unable to join queue" }, { status: 500 });

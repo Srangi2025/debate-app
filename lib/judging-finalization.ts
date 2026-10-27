@@ -22,6 +22,7 @@ export async function finalizeAIJudgment(
       `match:${matchId}`,
       `result:${matchId}`,
       `match:${matchId}:judging-lock`,
+      "history:pending",
     ],
     [
       lockToken,

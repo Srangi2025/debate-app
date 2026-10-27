@@ -22,6 +22,7 @@ type Options = {
   now?: () => number;
   evaluate?: (topic: string, a: string, b: string, signal?: AbortSignal) => Promise<AIJudgeResult>;
   renewIntervalMs?: number;
+  historyQueueKey?: string;
 };
 
 // One claimed job per call; multiple worker processes share Redis ownership.
@@ -75,7 +76,7 @@ export async function processNextJudgment(redis: Store, options: Options = {}) {
       if (!isAIJudgeResult(judgment)) throw new Error("Invalid response from AI judge");
       const finalized = await redis.eval<unknown[], { ok: boolean; reason?: string }>(
         FINALIZE_JUDGMENT_SCRIPT,
-        [`match:${job.matchId}`, `result:${job.matchId}`, `match:${job.matchId}:judging-lock`],
+        [`match:${job.matchId}`, `result:${job.matchId}`, `match:${job.matchId}:judging-lock`, options.historyQueueKey ?? "history:pending"],
         [token, JSON.stringify(judgment), now()]
       );
       if (!finalized.ok) throw new Error(`Judgment was not saved: ${finalized.reason}`);

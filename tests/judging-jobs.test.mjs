@@ -36,10 +36,10 @@ async function fixture(t, count = 1) {
   const queueKey = `${prefix}schedule`;
   const jobPrefix = `${prefix}job:`;
   const clock = { now: 1000 };
-  const options = { queueKey, jobPrefix, now: () => clock.now, evaluate: async () => structuredClone(judgment) };
+  const options = { queueKey, jobPrefix, historyQueueKey: `${prefix}history`, now: () => clock.now, evaluate: async () => structuredClone(judgment) };
   const ids = [];
   t.after(async () => {
-    const keys = [queueKey, ...ids.flatMap(id => [`match:${id}`, `result:${id}`, `match:${id}:submissions`, `match:${id}:judging-lock`, `${jobPrefix}${id}`])];
+    const keys = [queueKey, options.historyQueueKey, ...ids.flatMap(id => [`match:${id}`, `result:${id}`, `match:${id}:submissions`, `match:${id}:judging-lock`, `${jobPrefix}${id}`])];
     await redis.del(...keys);
   });
   const enqueue = (id = ids[0]) => redis.eval(ENQUEUE_JUDGING_SCRIPT,

@@ -24,10 +24,10 @@ export async function GET(
     const outcome = await redis.eval<unknown[], { match?: MatchRecord; error?: string; statusCode?: number }>(
       MATCH_LIFECYCLE_SCRIPT,
       [`match:${id}`, `user:${access.match.player1?.userId}:match`, `user:${access.match.player2?.userId}:match`],
-      [userId, Date.now(), "heartbeat"]
+      [access.participantId, Date.now(), "heartbeat"]
     );
     if (!outcome.match) return NextResponse.json({ error: outcome.error }, { status: outcome.statusCode ?? 500 });
-    const submission = await redis.hget<{ transcript: string }>(`match:${id}:submissions`, userId);
+    const submission = await redis.hget<{ transcript: string }>(`match:${id}:submissions`, access.participantId);
     return NextResponse.json({
       ...outcome.match,
       submissionReceived: !!submission,

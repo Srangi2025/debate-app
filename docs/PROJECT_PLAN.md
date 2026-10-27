@@ -103,7 +103,7 @@ kind/verdict cases. This is not a human accuracy benchmark. Human-labelled data,
 fine-tuning/runtime compatibility, and a held-out quality benchmark remain open.
 See [the model workflow](MODEL_TRAINING.md).
 
-## 4b. AI quality improvements — complete locally; commit approval pending
+## 4b. AI quality improvements — complete locally; committed as 474d7f2
 
 - Review every section of long frozen transcripts using bounded prompts; label
   summary-based final scoring and preserve original text in storage.
@@ -119,12 +119,31 @@ accuracy evaluation and custom training remain open.
 
 See [final judging details](FINAL_JUDGING.md).
 
-## 5. History, accounts, and rankings — next after AI quality review
+## 5. History, accounts, and rankings — implemented and locally verified; live account activation pending
 
-- Add durable match history and inspectable transcripts/results.
-- Define account identity and guest-to-account migration.
-- Connect rating updates only after result reliability and rating rules are verified.
-- Provide Redis persistence/backups and a durable history database for deployment.
+- Archive completed debates, frozen submissions, speaker segments, and canonical
+  results to a local SQLite database through a recoverable Redis outbox.
+- Add owner-filtered history pages, pagination, saved-result recovery, and backups.
+- Add Supabase email/password sign-in, confirmation guidance, local sign-out, and
+  explicit guest-cookie-proven history import with one-owner and active-room guards.
+- Preserve original speaker identities, account names, transcripts, and evidence;
+  keep rating updates disabled until model accuracy/rating rules are validated.
+- Provide schema, legacy backfill, online backup/check commands, and deployment notes.
+
+Verified locally: 68 Node tests, 40 Python tests, TypeScript, lint, production build,
+and a reproducible browser flow covering Steps 1–4 plus account import/privacy,
+forged tokens/IDs, active-room rejection, signup confirmation, Redis data loss,
+app/worker restart, permanent-account matching/contributions, and mobile history.
+Speech and AI calls used the real local
+services; authentication used an isolated provider fixture and sent no email.
+The compatible dependency update also resolves the npm audit findings.
+
+The configured Supabase Auth endpoint failed DNS resolution (`ENOTFOUND`) during
+the October 26, 2026 live connection check. A reachable project URL and matching
+publishable key are still needed before real account login can be verified.
+Cloud Redis responded successfully. The owner authorized committing and pushing
+the Step 5 checkpoint; all 68 Node tests, lint, and the production build passed.
+See [history/accounts setup and validation](HISTORY_AND_ACCOUNTS.md).
 
 ## 6. Public deployment and capacity — planned
 

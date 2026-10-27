@@ -78,6 +78,8 @@ match.endedAt = tonumber(ARGV[3])
 
 redis.call('SET', KEYS[2], cjson.encode(result))
 redis.call('SET', KEYS[1], cjson.encode(match))
+-- Archive delivery survives worker interruption along with the saved result.
+if KEYS[4] then redis.call('ZADD', KEYS[4], tonumber(ARGV[3]), match.id) end
 redis.call('DEL', KEYS[3])
 
 return cjson.encode({

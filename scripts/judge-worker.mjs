@@ -4,6 +4,7 @@ nextEnv.loadEnvConfig(process.cwd(), process.env.NODE_ENV !== "production");
 const { redis } = await import("../lib/redis.ts");
 const { processNextJudgment } = await import("../lib/judging-worker.ts");
 const { processNextLiveFeedback } = await import("../lib/live-feedback-worker.ts");
+const { processNextArchive } = await import("../lib/history-worker.ts");
 const { JUDGING_HEARTBEAT } = await import("../lib/judging-jobs.ts");
 let stopping = false;
 process.on("SIGINT", () => { stopping = true; });
@@ -19,9 +20,10 @@ try {
   do {
     try {
       const processed = await processNextJudgment(redis);
+      const archived = await processNextArchive(redis);
       if (process.argv.includes("--once")) break;
       // Final outcomes take priority; live snapshots are lower-priority work.
-      if (!processed && !await processNextLiveFeedback(redis)) await new Promise(resolve => setTimeout(resolve, 500));
+      if (!processed && !archived && !await processNextLiveFeedback(redis)) await new Promise(resolve => setTimeout(resolve, 500));
     } catch (error) {
       console.error("[judge-worker] Store unavailable; retrying:", error instanceof Error ? error.message : "Unknown error");
       if (process.argv.includes("--once")) { process.exitCode = 1; break; }

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { redis } from "@/lib/redis";
 import { JUDGING_JOB_PREFIX, JUDGING_HEARTBEAT, type JudgingJob } from "@/lib/judging-jobs";
 import { resultPayload } from "@/lib/result-payload";
+import { historyStore } from "@/lib/history-store";
 
 export async function GET(
   req: NextRequest,
@@ -14,6 +15,8 @@ export async function GET(
     const userId = auth.userId;
 
     const { id } = await context.params;
+    const archived = historyStore().get(userId, id);
+    if (archived) return NextResponse.json(archived.result);
 
     const access = await authorizeMatch(id, userId);
     if (access.response) return access.response;

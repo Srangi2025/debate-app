@@ -14,24 +14,29 @@
     "test:judging": "node --test tests/judging-jobs.test.mjs",
     "test:transcript": "node --test tests/transcript.test.mjs",
     "test:live": "node --test tests/live-feedback.test.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "history:check": "node scripts/history-db.mjs check",
+    "history:backup": "node scripts/history-db.mjs backup",
+    "history:backfill": "node scripts/history-db.mjs backfill",
+    "verify:step5": "node scripts/verify-step5.mjs"
   },
   "dependencies": {
-    "@next/env": "16.3.8",
+    "@next/env": "16.4.3",
     "@supabase/supabase-js": "^2.117.2",
     "@upstash/redis": "^1.37.0",
     "ioredis": "^5.10.1",
-    "next": "^16.3.8",
+    "next": "16.4.3",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
+    "@types/node": "^24.19.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "^16.3.8",
+    "eslint-config-next": "16.4.3",
+    "playwright": "^1.64.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   },

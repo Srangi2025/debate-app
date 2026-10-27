@@ -2,7 +2,7 @@
 
 A local-first prototype that pairs people for a live, one-to-one video debate, saves each speaker’s contributions, and produces a shared AI judgment. Live coaching and limited source-backed factual checks appear during the conversation.
 
-**Status:** guest profiles, concurrent matchmaking, video signalling, English transcription, saved submissions, recoverable judging jobs, and provisional live feedback are implemented. The judge uses a pretrained model; this repository does **not** yet contain a debate-fine-tuned model or a validated production accuracy claim. Persistent account history, applied Elo updates, TURN infrastructure, and public deployment hardening remain planned. See [the project plan](docs/PROJECT_PLAN.md) and [model training and evaluation](docs/MODEL_TRAINING.md).
+**Status:** guest profiles, concurrent matchmaking, video signalling, English transcription, saved submissions, recoverable judging jobs, and provisional live feedback are implemented. The judge uses a pretrained model; this repository does **not** yet contain a debate-fine-tuned model or a validated production accuracy claim. Durable local history and Supabase account sign-in/import are implemented. Applied Elo updates, TURN infrastructure, and public deployment hardening remain planned. See [the project plan](docs/PROJECT_PLAN.md) and [model training and evaluation](docs/MODEL_TRAINING.md).
 
 ## End-to-end behavior
 
@@ -14,6 +14,12 @@ A local-first prototype that pairs people for a live, one-to-one video debate, s
 6. **Submit Debate** flushes pending contributions. The server freezes that participant’s saved transcript; their first submission cannot be replaced. Both submissions enqueue final judging.
 7. The worker asks the local model for rubric scores, validates the response, calculates the winner deterministically, and saves one shared result. Failed jobs retry and survive web/worker restarts while Redis retains data.
 
+## History and accounts
+
+Completed debates are archived to an ignored local SQLite database. Open `/history` to review your saved transcript, rubric scores, and checked sources. `/account` supports Supabase email/password sign-up/sign-in and explicit import of the current browser guest’s history. Imported records preserve the original speakers. Signing out removes access to account history.
+
+Accounts require an active Supabase Auth project. This phase uses Supabase for authentication and SQLite for history; it does not require a Supabase database secret. Follow [the Step 5 setup, identity rules, backups, and test guide](docs/HISTORY_AND_ACCOUNTS.md).
+
 ## Architecture
 
 ```mermaid
@@ -24,6 +30,8 @@ flowchart LR
     W <-->|Profiles, queue, rooms, transcript, jobs, results| R[(Redis)]
     W -->|Short WAV clips| P[FastAPI AI service]
     J[Node judging worker] <--> R
+    W <--> H[(SQLite: history, profiles, guest sessions)]
+    J -->|Archive completed debates| H
     J -->|Final judging and live feedback| P
     P --> O[Ollama: Qwen3.5 4B]
     P --> S[faster-whisper: base.en]
@@ -31,26 +39,27 @@ flowchart LR
     W -. Optional existing account sessions .-> U[Supabase Auth]
 ```
 
-The browser does not connect directly to Ollama or Redis. The Python service has no Redis dependency; Next.js and the worker own persistence and authorization. Keep Python/Ollama private to the backend network. Supabase is optional authentication, not the primary database in this prototype.
+The browser does not connect directly to Ollama or Redis. The Python service has no Redis dependency; Next.js and the worker own persistence and authorization. Keep Python/Ollama private to the backend network. Supabase supplies optional account authentication. Redis coordinates live rooms; SQLite stores durable local history.
 
 ## Technology
 
 | Layer | Implementation |
 | --- | --- |
-| Web framework | Next.js 16.3.8 App Router; React and React DOM 19.2.4 |
+| Web framework | Next.js 16.4.3 App Router; React and React DOM 19.2.4 |
 | Language and styling | TypeScript 5, Tailwind CSS 4, PostCSS; system fonts |
 | Build and validation | webpack, ESLint 9 with Next.js rules, TypeScript checking |
 | Node runtime | Node.js 22.18+; native TypeScript imports in the worker; CI uses Node 24 |
-| Database and queues | Redis; atomic Lua scripts, lists, hashes, sorted sets, expiring leases |
+| Live database and queues | Redis; atomic Lua scripts, lists, hashes, sorted sets, expiring leases |
+| Durable history | Node built-in SQLite, WAL transactions, participant ownership, online backups |
 | Redis clients | ioredis for TCP Redis; @upstash/redis through a shared command adapter or hosted REST |
-| Sessions | HTTP-only guest cookie backed by Redis; optional verified Supabase bearer sessions |
+| Sessions | HTTP-only guest cookie with durable hashed credentials; verified Supabase account bearer sessions |
 | Realtime media | Browser WebRTC, getUserMedia, Google STUN; HTTP signalling/polling |
 | Browser speech pipeline | Web Audio/AudioWorklet, mono 16 kHz PCM WAV, IndexedDB upload outbox, localStorage drafts |
 | AI API | Python, FastAPI, Uvicorn, Pydantic 2, HTTPX |
 | Judge inference | Ollama; default pretrained `qwen3.5:4b`; JSON-schema-constrained responses |
 | Speech recognition | faster-whisper `base.en`; CTranslate2 CPU/int8; Silero VAD through runtime dependencies |
 | Evidence retrieval | Wikipedia search and summary APIs; standard curl or HTTPX transport; bounded cached extracts |
-| Testing | Node built-in test runner against Redis; pytest for Python; opt-in real-model evaluation CLI |
+| Testing | Node built-in runner against Redis/SQLite; pytest; opt-in real-model CLI and Playwright integration |
 | Automation | GitHub Actions: application tests, Python tests, lint, production build |
 
 JavaScript resolutions are in `package-lock.json`; Python dependencies currently use version ranges in `ai-service/requirements.txt`, so Python installs are not fully locked. No paid model API key is required for the active local AI path. `lib/openai.ts` is legacy code and is not the active judge.
@@ -151,8 +160,9 @@ Next.js and the worker load Next.js environment files from the repository root. 
 | `UPSTASH_REDIS_REST_URL` | Hosted Redis REST endpoint when `REDIS_URL` is absent |
 | `UPSTASH_REDIS_REST_TOKEN` | Hosted Redis REST credential; server only |
 | `AI_JUDGE_URL` | Backend Python origin; required for final/live AI processing |
+| `HISTORY_DB_PATH` | Persistent local SQLite file shared by web and worker; defaults to `data/debate-history.sqlite` |
 | `TRANSCRIPTION_URL` | Optional speech service origin; defaults to `AI_JUDGE_URL` |
-| `NEXT_PUBLIC_SUPABASE_URL` | Optional existing Supabase auth project URL |
+| `NEXT_PUBLIC_SUPABASE_URL` | Active Supabase Auth project URL for permanent accounts |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Optional public Supabase auth key; never use a service-role secret here |
 | `REDIS_TEST_URL` | Test-only Redis connection; defaults to localhost:6379 |
 
@@ -211,7 +221,7 @@ Quote validation proves that text was retrieved; it does not prove that the quot
 
 ## Storage and authorization
 
-Redis is the current shared backend database; this project does not yet maintain a separate SQL debate history.
+Redis stores live coordination data and pending archive delivery. SQLite stores immutable completed debates, participant ownership, profiles, and hashed guest sessions. See [the Step 5 schema and backup guide](docs/HISTORY_AND_ACCOUNTS.md).
 
 | Key family | Data |
 | --- | --- |
@@ -226,8 +236,10 @@ Redis is the current shared backend database; this project does not yet maintain
 | `judging:worker-heartbeat` | Worker availability hint |
 | `feedback:jobs`, `match:<id>:feedback-*`, `match:<id>:live-feedback` | Live analysis schedule/state/leases and latest snapshot |
 | `result:<id>` | Pending or completed shared outcome |
+| `history:pending` | Retryable SQL archive delivery after finalization |
+| `identity:<guest>:retired` | Guest-import reservation/retirement guard against in-flight queue joins |
 
-Guests receive a random HTTP-only, SameSite=Lax cookie; HTTPS deployments use a secure cookie. Separate browser contexts have separate identities. Existing Supabase bearer tokens are verified server-side. Match-specific routes check participant membership; the server assigns speaker identity. Cookie lifetime is not an account/history guarantee. Redis persistence, backups, retention policy, and deletion tools need explicit deployment configuration.
+Guests receive a random HTTP-only, SameSite=Lax cookie; HTTPS deployments use a secure cookie. Separate browser contexts have separate identities. Existing Supabase bearer tokens are verified server-side. Match-specific routes check participant membership; the server assigns speaker identity. Guest identity lasts until credential/cookie expiry; import it into an account for access beyond that browser session. SQLite and Redis persistence/backups must be configured for deployment. Retention/deletion tooling remains future work.
 
 ## API surface
 
@@ -250,8 +262,11 @@ Guests receive a random HTTP-only, SameSite=Lax cookie; HTTPS deployments use a 
 | POST | `/api/webrtc/offer`, `/answer`, `/candidate`, `/reset` | Exchange room signalling (all under `/api/webrtc`) |
 | GET | `/api/webrtc/poll` | Receive peer signalling |
 | GET | `/api/leaderboard` | Read existing ratings; no automatic rating updates |
+| GET | `/api/history`, `/api/history/[id]` | Read only the authenticated owner’s SQL history/transcript/results |
+| GET | `/api/account` | Account/guest-import and active-room status |
+| POST | `/api/account/claim` | Verified account plus guest-cookie proof to import history |
 
-Legacy `/api/matchmake` and `/api/debug/reset` are disabled with HTTP 410. Main pages are `/`, `/dashboard`, `/queue`, `/match/[id]`, `/result/[id]`, and `/leaderboard`.
+Legacy `/api/matchmake` and `/api/debug/reset` are disabled with HTTP 410. Main pages are `/`, `/dashboard`, `/queue`, `/match/[id]`, `/result/[id]`, `/leaderboard`, `/history`, `/history/[id]`, and `/account`.
 
 ### Private Python routes
 
@@ -311,7 +326,9 @@ NODE_ENV=production npm run judge:worker
 
 Also manage Python/Uvicorn, Ollama, and Redis independently. Web instances and workers must share the same Redis and AI origins. Keep secrets server-side, configure Redis persistence/backups and retention, use HTTPS for browsers, and keep internal AI endpoints private. A production supervisor should restart failed services and allow in-flight work to finish during shutdown.
 
-`vercel.json` configures the Next.js portion only. Deploying that directory to Vercel does not provide the Python service, Ollama weights/hardware, Redis, or a persistent Node worker. GitHub stores source; pushing to GitHub does not by itself provision these services. This application cannot work as a static GitHub Pages export.
+The current SQLite archive requires persistent local storage shared by the web and worker processes on one host. Use a managed Node host/volume for this implementation. A shared SQL adapter is required before running these processes across separate hosts or Vercel serverless instances.
+
+`vercel.json` configures the Next.js build only. Deploying that directory to Vercel does not provide the Python service, Ollama weights/hardware, Redis, or a persistent Node worker. GitHub stores source; pushing to GitHub does not by itself provision these services. This application cannot work as a static GitHub Pages export.
 
 WebRTC currently uses Google STUN and has **no TURN relay**. Local testing does not establish connectivity across restrictive real-world networks. Add TURN, validate AI throughput/queue delay, and implement production account/history controls before a broad launch. Queue tests with 10 or 101 synthetic users establish pairing behavior, not equivalent AI/video capacity.
 
@@ -320,7 +337,7 @@ WebRTC currently uses Google STUN and has **no TURN relay**. Local testing does 
 | Symptom | Checks |
 | --- | --- |
 | Two windows never pair | Use regular + incognito/guest contexts, same hostname, a shared topic, and the same Redis backend; ensure Save succeeds |
-| Name does not survive refresh | Check Redis availability, cookie acceptance, hostname consistency, and `/api/profile` response |
+| Name does not survive refresh | Check SQLite path/permissions, cookie acceptance, hostname consistency, and `/api/profile` response |
 | Camera/mic unavailable | Allow permissions; use localhost or HTTPS; review browser device ownership |
 | Video connects locally but not remotely | Restrictive networks may require the not-yet-configured TURN relay |
 | Transcript unavailable | Check Python, model warm-up, `/transcription/health`, mic permissions, and pending outbox; text contributions remain available |
@@ -329,6 +346,8 @@ WebRTC currently uses Google STUN and has **no TURN relay**. Local testing does 
 | Facts show Unverified | Sources may be unavailable, unrelated, or insufficient; inspect the linked quotations rather than assuming false |
 | Port already in use | Reuse the existing service or stop the process you started; do not launch duplicate Ollama/Next processes |
 | Python cannot import `app` | Run Uvicorn/tests/evaluation from `ai-service` |
+| Account sign-in unavailable | Check the active replacement Supabase URL/publishable key, email auth settings, allowed redirects, and restart Next.js |
+| History missing immediately after judging | Keep the worker running and check the retryable archive job/database path; use backfill for older completed rooms |
 | Native dependency install fails | Use a Python version with compatible wheels, such as the CI target 3.12, and recreate the venv |
 
 For LAN development, review `next.config.ts` allowed origins and browser secure-context requirements; another device’s `localhost` points to that device, not your development Mac.
@@ -339,11 +358,12 @@ For LAN development, review `next.config.ts` allowed origins and browser secure-
 app/                    Pages, browser components, and authenticated Next.js API routes
 lib/                    Auth, Redis adapter, Lua workflows, transcript/outbox and worker logic
 public/audio/           Browser AudioWorklet capture code
-scripts/                Combined dev launcher and persistent judging worker
+scripts/                Dev/worker launchers, history administration, and browser verification
 ai-service/app/         FastAPI, model prompts, speech, live evidence checks, Elo preview
 ai-service/tests/       Python behavior and dataset/evaluation tests
 ai-service/evaluation/  Synthetic fixtures, dataset validation/export, real-model evaluation CLI
-tests/                  Redis-backed Node integration tests
+tests/                  Redis/SQLite Node integration tests
+db/                     SQLite history schema
 docs/                   Project plan and model training/evaluation documentation
 .github/workflows/      CI validation
 ```
