@@ -8,7 +8,7 @@ from .judge import evaluate_debate, JUDGE_VERSION, RUBRIC_VERSION, MODEL
 from .elo import calculate_preview
 from .transcription import transcribe_wav, speech_model, MAX_AUDIO_BYTES, MODEL as SPEECH_MODEL
 from .live_schemas import LiveRequest
-from .live_feedback import analyze_live
+from .live_feedback import analyze_live, LIVE_VERSION
 
 app = FastAPI(title="Debate AI Judge", version="0.3.0")
 
@@ -38,7 +38,7 @@ async def transcribe(audio: UploadFile):
 @app.get("/health")
 def health():
     return {"status": "ok", "model": MODEL, "judge_version": JUDGE_VERSION,
-            "rubric_version": RUBRIC_VERSION, "elo_updates_enabled": False}
+            "rubric_version": RUBRIC_VERSION, "live_version": LIVE_VERSION, "elo_updates_enabled": False}
 
 @app.post("/judge", response_model=DebateResult)
 async def judge(request: DebateRequest):

@@ -8,7 +8,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     const auth = await authenticate(req);
     if (auth.response) return auth.response;
     const { id } = await params;
-    const archived = historyStore().get(auth.userId, id);
+    const archived = await historyStore().get(auth.userId, id);
     if (!archived) return NextResponse.json({ error: "Saved debate not found" }, { status: 404 });
     return NextResponse.json(archived);
   } catch {

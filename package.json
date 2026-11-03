@@ -11,6 +11,8 @@
     "test:matchmaking": "node --test tests/matchmaking.test.mjs tests/match-lifecycle.test.mjs",
     "dev:web": "next dev --webpack",
     "judge:worker": "node scripts/judge-worker.mjs",
+    "ai:dev": "node scripts/ai-dev.mjs",
+    "ai:check": "node scripts/ai-check.mjs",
     "test:judging": "node --test tests/judging-jobs.test.mjs",
     "test:transcript": "node --test tests/transcript.test.mjs",
     "test:live": "node --test tests/live-feedback.test.mjs",
@@ -18,6 +20,9 @@
     "history:check": "node scripts/history-db.mjs check",
     "history:backup": "node scripts/history-db.mjs backup",
     "history:backfill": "node scripts/history-db.mjs backfill",
+    "history:postgres:init": "node scripts/history-postgres.mjs init",
+    "history:postgres:import": "node scripts/history-postgres.mjs import-sqlite",
+    "test:postgres": "node --test tests/postgres-history.test.mjs",
     "verify:step5": "node scripts/verify-step5.mjs"
   },
   "dependencies": {
@@ -26,12 +31,14 @@
     "@upstash/redis": "^1.37.0",
     "ioredis": "^5.10.1",
     "next": "16.4.3",
+    "pg": "^8.23.1",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

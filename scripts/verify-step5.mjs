@@ -52,7 +52,7 @@ async function stopApp() {
 async function startApp() {
   app = spawn(process.execPath, ["scripts/dev.mjs", "-H", "127.0.0.1", "-p", String(port)], {
     cwd: checkout,
-    env: { ...process.env, REDIS_URL: redisUrl, HISTORY_DB_PATH: dbPath,
+    env: { ...process.env, REDIS_URL: redisUrl, HISTORY_DATABASE_URL: "", VERCEL: "", HISTORY_DB_PATH: dbPath,
       NEXT_PUBLIC_SUPABASE_URL: fixture.url, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "test-publishable-key",
       AI_JUDGE_URL: process.env.E2E_AI_URL || "http://127.0.0.1:8001", NODE_ENV: "development" },
     stdio: ["ignore", "pipe", "pipe"],

@@ -15,7 +15,7 @@ export async function GET(
     const userId = auth.userId;
 
     const { id } = await context.params;
-    const archived = historyStore().get(userId, id);
+    const archived = await historyStore().get(userId, id);
     if (archived) return NextResponse.json(archived.result);
 
     const access = await authorizeMatch(id, userId);

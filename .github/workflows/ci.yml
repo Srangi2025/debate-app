@@ -6,6 +6,14 @@ jobs:
   web:
     runs-on: ubuntu-latest
     services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: debate
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: debate_history_test
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U debate -d debate_history_test" --health-interval 5s --health-timeout 3s --health-retries 10
       redis:
         image: redis:7-alpine
         ports: ["6379:6379"]
@@ -13,6 +21,7 @@ jobs:
     env:
       REDIS_URL: redis://127.0.0.1:6379
       REDIS_TEST_URL: redis://127.0.0.1:6379
+      HISTORY_PG_TEST_URL: postgresql://debate:test-only-password@127.0.0.1:5432/debate_history_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

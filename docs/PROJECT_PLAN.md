@@ -103,6 +103,18 @@ kind/verdict cases. This is not a human accuracy benchmark. Human-labelled data,
 fine-tuning/runtime compatibility, and a held-out quality benchmark remain open.
 See [the model workflow](MODEL_TRAINING.md).
 
+November 3 local AI recovery: Ollama/Qwen was already running, while Python was
+stopped. The Python judging/transcription service was restarted; actual speech
+recognition, GPU inference, worker heartbeat, and live source retrieval were
+verified. The restored judge passed 3/3 synthetic winner cases and swaps, while
+live factual checking repeated its 4/5 baseline with a prediction misclassified
+as fact. Live evidence v2 clarifies future-outcome classification and rejects
+unfinished model responses. It passed 12/12 combined synthetic evidence/temporal
+regressions; 42 Python tests and lint passed. This is not independent human
+accuracy validation or custom training. Root-level AI start/check commands and
+evaluation progress/model identity reporting are now available. See
+[AI operations](AI_OPERATIONS.md).
+
 ## 4b. AI quality improvements — complete locally; committed as 474d7f2
 
 - Review every section of long frozen transcripts using bounded prompts; label
@@ -119,7 +131,7 @@ accuracy evaluation and custom training remain open.
 
 See [final judging details](FINAL_JUDGING.md).
 
-## 5. History, accounts, and rankings — implemented and locally verified; live account activation pending
+## 5. History, accounts, and rankings — implemented; real account sign-in confirmed
 
 - Archive completed debates, frozen submissions, speaker segments, and canonical
   results to a local SQLite database through a recoverable Redis outbox.
@@ -138,14 +150,17 @@ Speech and AI calls used the real local
 services; authentication used an isolated provider fixture and sent no email.
 The compatible dependency update also resolves the npm audit findings.
 
-The configured Supabase Auth endpoint failed DNS resolution (`ENOTFOUND`) during
-the October 26, 2026 live connection check. A reachable project URL and matching
-publishable key are still needed before real account login can be verified.
+The configured Supabase project was restored on November 3, 2026. Auth health
+and settings returned HTTP 200 with the configured publishable key; email auth
+and signup are enabled, with email auto-confirm currently enabled. The owner
+confirmed real signup/sign-in and the guest-import UI in the local app.
+Real confirmation-email delivery is not tested while auto-confirm is enabled;
+production rollout checks remain separate from this account activation.
 Cloud Redis responded successfully. The owner authorized committing and pushing
 the Step 5 checkpoint; all 68 Node tests, lint, and the production build passed.
 See [history/accounts setup and validation](HISTORY_AND_ACCOUNTS.md).
 
-## 6. Public deployment and capacity — planned
+## 6. Public deployment and capacity — in progress; invite-only pilot first
 
 - Configure TURN for browser pairs whose networks cannot establish direct WebRTC.
 - Provision shared Redis, an AI service, and managed worker processes.
@@ -154,6 +169,33 @@ See [history/accounts setup and validation](HISTORY_AND_ACCOUNTS.md).
 
 Local correctness tests establish behavior; they do not establish public-service
 capacity or connectivity across arbitrary networks.
+
+November 3, 2026 assessment: Steps 1–4 and the local Step 5 checkpoint are
+implemented and committed. Real account activation now works after restoring the
+existing Supabase project (see Step 5 above).
+The owner selected a small invite-only pilot and wants to retain Vercel hosting.
+
+The first Step 6 increment adds participant-authorized, non-cacheable ICE
+configuration with optional coturn-compatible, one-hour TURN credentials. The
+shared secret stays server-side; relay-only mode enables explicit relay testing.
+Verified: 71 Node tests, TypeScript, lint, production build, and production-server
+HTTP checks for participant/outsider access, ended rooms, and cache headers.
+A real TURN service is not provisioned and cross-network relay testing is pending.
+
+The next increment adds optional PostgreSQL history/profile/guest storage, a
+private schema, async route/worker integration, and an atomic, retryable SQLite
+import that refuses conflicting records. SQLite remains available locally;
+Vercel explicitly requires the shared database. Verified TLS connection, private
+schema setup, and live import into the restored Supabase project succeeded.
+The source had zero archived debates/claims, one profile, and ten unexpired guest
+sessions; the SQLite original and verified backup are preserved. The local web
+and worker were restarted against PostgreSQL. The persistent worker/private AI service still
+need external runtime hosting, and Vercel CLI currently has no logged-in account.
+Deployment is not complete. Validation passed 83 Node tests (including real
+PostgreSQL/Redis), 40 Python tests, production HTTP persistence/privacy checks,
+lint, TypeScript, and the production build. Live post-cutover session, profile,
+history, and account routes returned HTTP 200. This does not establish hosted capacity.
+See [the pilot deployment checklist](PILOT_DEPLOYMENT.md).
 
 ## GitHub checkpoints
 

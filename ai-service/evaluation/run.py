@@ -6,19 +6,22 @@ import hashlib
 import json
 from pathlib import Path
 import time
+import sys
+import httpx
 
 from app.judge import MODEL, JUDGE_VERSION, RUBRIC_VERSION, evaluate_debate
 from app.live_feedback import LIVE_VERSION, analyze_live
 from app.live_schemas import LiveRequest
 from .dataset import prepare, read_dataset
+from app.model_client import OLLAMA_URL, CONTEXT_TOKENS
 
 
 def rate(numerator, denominator):
     return round(numerator / denominator, 4) if denominator else None
 
 
-async def evaluate(debates: Path, facts: Path | None, *, judge=evaluate_debate, live=analyze_live):
-    rows = read_dataset(debates)
+async def evaluate(debates: Path | None, facts: Path | None, *, judge=evaluate_debate, live=analyze_live, progress=None):
+    rows = read_dataset(debates) if debates else []
     outcomes, errors, correct, swaps, score_error, score_count = [], 0, 0, 0, 0, 0
     for row in rows:
         started = time.monotonic()
@@ -43,6 +46,8 @@ async def evaluate(debates: Path, facts: Path | None, *, judge=evaluate_debate, 
             item["error_type"] = type(exc).__name__
         item["seconds"] = round(time.monotonic() - started, 2)
         outcomes.append(item)
+        if progress:
+            progress("debates", len(outcomes), len(rows))
     fact_results, expected_count, matched, exact, decided, correct_decided, invalid_citations, returned, expected_decided = [], 0, 0, 0, 0, 0, 0, 0, 0
     if facts:
         for line in facts.read_text().splitlines():
@@ -79,9 +84,11 @@ async def evaluate(debates: Path, facts: Path | None, *, judge=evaluate_debate, 
             except Exception as exc:
                 item["error_type"] = type(exc).__name__
             fact_results.append(item)
+            if progress:
+                progress("fact cases", len(fact_results), None)
     return {
         "created_at": datetime.now(timezone.utc).isoformat(), "model": MODEL, "judge_version": JUDGE_VERSION, "rubric_version": RUBRIC_VERSION, "live_version": LIVE_VERSION,
-        "dataset_sha256": hashlib.sha256(debates.read_bytes()).hexdigest(),
+        "dataset_sha256": hashlib.sha256(debates.read_bytes()).hexdigest() if debates else None,
         "facts_sha256": hashlib.sha256(facts.read_bytes()).hexdigest() if facts else None,
         "warning": "Synthetic smoke fixtures do not establish human agreement or production accuracy. Frozen evidence does not test live retrieval quality.",
         "judging": {"cases": len(rows), "failures": errors, "winner_agreement": rate(correct, len(rows)), "speaker_swap_consistency": rate(swaps, len(rows)), "rubric_mae": rate(score_error, score_count)},
@@ -102,18 +109,39 @@ def main():
     check.add_argument("--facts", type=Path)
     check.add_argument("--output", type=Path, required=True)
     check.add_argument("--offline-evidence", action="store_true", help="Disable final-judge network retrieval; frozen live-fact fixtures still run")
+    check.add_argument("--facts-only", action="store_true", help="Run frozen-source fact cases without repeating debate inference")
     args = parser.parse_args()
     if args.command == "prepare":
         print(json.dumps(prepare(args.input, args.output, args.seed), indent=2))
     else:
+        if args.facts_only and not args.facts:
+            parser.error("--facts-only requires --facts")
         if args.output.exists():
             parser.error("Use a new report path to preserve previous model runs")
         async def no_sources(_query):
             return [], "no_results"
         async def offline_judge(request):
             return await evaluate_debate(request, retrieve=no_sources)
-        result = asyncio.run(evaluate(args.debates, args.facts, **({"judge": offline_judge} if args.offline_evidence else {})))
-        result["final_evidence_mode"] = "disabled" if args.offline_evidence else "live_retrieval"
+        def progress(stage, count, total):
+            print(f"Completed {stage}: {count}" + (f"/{total}" if total else ""), file=sys.stderr, flush=True)
+        async def run():
+            # Record immutable local weight identity alongside the mutable model tag.
+            identity = {"status": "unavailable", "final_context_tokens": CONTEXT_TOKENS, "live_context_tokens": 8192, "temperature": 0}
+            try:
+                async with httpx.AsyncClient(timeout=3) as client:
+                    response = await client.get(f"{OLLAMA_URL}/api/tags")
+                    response.raise_for_status()
+                    installed = next((item for item in response.json().get("models", []) if item.get("name") == MODEL), None)
+                    if installed:
+                        identity.update(status="recorded", digest=installed.get("digest"), details=installed.get("details", {}))
+            except (httpx.HTTPError, ValueError, TypeError):
+                pass
+            report = await evaluate(None if args.facts_only else args.debates, args.facts, progress=progress,
+                                    **({"judge": offline_judge} if args.offline_evidence else {}))
+            report["model_identity"] = identity
+            return report
+        result = asyncio.run(run())
+        result["final_evidence_mode"] = "not_run" if args.facts_only else "disabled" if args.offline_evidence else "live_retrieval"
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(result, indent=2) + "\n")
         print(json.dumps({key: result[key] for key in ("model", "judging", "facts", "warning")}, indent=2))

@@ -23,16 +23,16 @@ export async function POST(req: Request) {
     if (!guest) return NextResponse.json({ imported: 0, alreadyClaimed: true });
     const reserved = await redis.eval<unknown[], { error?: string; statusCode?: number }>(RESERVE_GUEST_CLAIM_SCRIPT, [], [guest, account, Date.now()]);
     if (reserved.error) return NextResponse.json({ error: reserved.error }, { status: reserved.statusCode ?? 409 });
-    if (!historyStore().profile(guest)) {
+    if (!await historyStore().profile(guest)) {
       const legacy = await redis.hget<unknown>("users:usernames", guest);
-      if (legacy != null) historyStore().saveProfile(guest, String(legacy));
+      if (legacy != null) await historyStore().saveProfile(guest, String(legacy));
     }
-    const result = historyStore().claimGuest(guest, account);
+    const result = await historyStore().claimGuest(guest, account);
     committed = true;
     await redis.expire(`identity:${guest}:retired`, 30 * 86400).catch(() => {});
     if (credential) await redis.del(`guest-session:${credential}`).catch(() => {});
     store.delete("debate-guest");
-    const username = historyStore().profile(account);
+    const username = await historyStore().profile(account);
     if (username) await redis.hset("users:usernames", { [account]: JSON.stringify(username) }).catch(() => {});
     return NextResponse.json(result);
   } catch {

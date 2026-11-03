@@ -19,7 +19,7 @@ export async function authenticate(req: Request) {
     if (existing) return { userId: existing, kind: "guest" as const, email: null };
     const sessionId = randomUUID();
     const userId = `guest:${randomUUID()}`;
-    historyStore().rememberGuest(sessionId, userId, Date.now() + 30 * 86400000);
+    await historyStore().rememberGuest(sessionId, userId, Date.now() + 30 * 86400000);
     await redis.set(`guest-session:${sessionId}`, userId, { ex: 60 * 60 * 24 * 30 }).catch(() => {});
     store.set("debate-guest", sessionId, {
       httpOnly: true, sameSite: "lax", secure: new URL(req.url).protocol === "https:",
@@ -49,8 +49,12 @@ export type MatchRecord = {
 export async function authorizeMatch(matchId: string, userId: string) {
   const match = await redis.get<MatchRecord>(`match:${matchId}`);
   if (!match) return { response: NextResponse.json({ error: "Match not found" }, { status: 404 }) };
-  const participant = [match.player1, match.player2].find(player => player?.userId === userId ||
-    (match.status !== "active" && player && historyStore().participantOwner(player.userId) === userId));
+  let participant = [match.player1, match.player2].find(player => player?.userId === userId);
+  if (!participant && match.status !== "active") {
+    for (const player of [match.player1, match.player2]) {
+      if (player && await historyStore().participantOwner(player.userId) === userId) { participant = player; break; }
+    }
+  }
   if (!participant) {
     return { response: NextResponse.json({ error: "You are not a participant in this match" }, { status: 403 }) };
   }

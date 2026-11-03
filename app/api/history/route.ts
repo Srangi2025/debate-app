@@ -17,7 +17,7 @@ export async function GET(req: Request) {
         cursor = parsed;
       } catch { return NextResponse.json({ error: "Invalid history cursor" }, { status: 400 }); }
     }
-    const page = historyStore().list(auth.userId, cursor);
+    const page = await historyStore().list(auth.userId, cursor);
     return NextResponse.json({ ...page, nextCursor: page.nextCursor ? Buffer.from(JSON.stringify(page.nextCursor)).toString("base64url") : null });
   } catch {
     return NextResponse.json({ error: "History is temporarily unavailable. Please retry." }, { status: 503 });

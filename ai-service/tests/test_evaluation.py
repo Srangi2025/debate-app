@@ -97,3 +97,17 @@ def test_wrong_and_unknown_claims_reduce_decision_precision(tmp_path):
     assert result["facts"]["decision_precision"] == 0
     assert result["facts"]["kind_and_verdict_accuracy"] == 0
     assert result["facts"]["claim_recall"] == 1
+
+
+def test_facts_only_evaluation_does_not_invoke_judge_and_reports_empty_denominators(tmp_path):
+    facts = tmp_path / "empty-facts.jsonl"
+    facts.write_text("")
+    async def judge(_request):
+        raise AssertionError("Facts-only runs must not evaluate debates")
+    events = []
+    result = asyncio.run(evaluate(None, facts, judge=judge, progress=lambda *args: events.append(args)))
+    assert result["judging"]["cases"] == 0
+    assert result["judging"]["winner_agreement"] is None
+    assert result["dataset_sha256"] is None
+    assert result["facts"]["kind_and_verdict_accuracy"] is None
+    assert events == []

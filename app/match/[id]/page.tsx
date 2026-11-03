@@ -204,10 +204,8 @@ function MatchRoom({ matchId }: { matchId: string | undefined }) {
     }
   }, [loading, mediaReady]);
 
-  function createPeerConnection(currentMatchId: string, myUserId: string) {
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
+  function createPeerConnection(currentMatchId: string, myUserId: string, configuration: RTCConfiguration) {
+    const pc = new RTCPeerConnection(configuration);
 
     const remoteStream = new MediaStream();
     remoteStreamRef.current = remoteStream;
@@ -284,6 +282,13 @@ function MatchRoom({ matchId }: { matchId: string | undefined }) {
       try {
         setConnectionStatus("connecting");
 
+        const configResponse = await authenticatedFetch(
+          `/api/webrtc/config?matchId=${encodeURIComponent(currentMatchId)}`
+        );
+        if (!configResponse.ok) throw new Error("Call configuration unavailable");
+        const configuration: RTCConfiguration = await configResponse.json();
+        if (stopped) return;
+
         if (isCaller) {
           await authenticatedFetch("/api/webrtc/reset", {
             method: "POST",
@@ -294,7 +299,8 @@ function MatchRoom({ matchId }: { matchId: string | undefined }) {
           });
         }
 
-        const pc = createPeerConnection(currentMatchId, userId);
+        if (stopped) return;
+        const pc = createPeerConnection(currentMatchId, userId, configuration);
         pcRef.current = pc;
 
         localStreamRef.current?.getTracks().forEach((track) => {
@@ -377,7 +383,7 @@ function MatchRoom({ matchId }: { matchId: string | undefined }) {
         }, 1500);
       } catch (error) {
         console.error("WebRTC startup error:", error);
-        setConnectionStatus("failed");
+        if (!stopped) setConnectionStatus("failed");
       }
     }
 

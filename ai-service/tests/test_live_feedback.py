@@ -1,7 +1,21 @@
 """Reviewed cases for attribution, uncertainty, and source-grounding rules."""
 import asyncio
+import httpx
+import pytest
 from app.live_feedback import analyze_live, validate_assessment
 from app.live_schemas import LiveRequest, LiveExtraction, FactAssessment, FactAssessments
+
+
+def test_truncated_or_unfinished_model_responses_cannot_publish_claims(monkeypatch):
+    from app import live_feedback
+    real_client = httpx.AsyncClient
+    for completion in [{"done": False}, {"done": True, "done_reason": "length"}]:
+        transport = httpx.MockTransport(lambda _request: httpx.Response(200, json={
+            **completion, "message": {"content": extraction().model_dump_json()},
+        }))
+        monkeypatch.setattr(live_feedback.httpx, "AsyncClient", lambda **kwargs: real_client(transport=transport, **kwargs))
+        with pytest.raises(ValueError, match="did not finish"):
+            asyncio.run(live_feedback.structured("Check this claim", LiveExtraction))
 
 SOURCE = {
     "title": "Moon", "url": "https://en.wikipedia.org/wiki/Moon", "provider": "Wikipedia",

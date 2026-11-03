@@ -8,6 +8,7 @@ const store = historyStore();
 const command = process.argv[2] || "check";
 try {
   if (command === "backup") {
+    if (!("db" in store)) throw new Error("Postgres backups must use Supabase backups or pg_dump; this command backs up SQLite only");
     const destination = resolve(process.argv[3] || `data/backups/history-${new Date().toISOString().replace(/[:.]/g, "-")}.sqlite`);
     if (existsSync(destination)) throw new Error("Backup destination already exists; choose a new file");
     mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
@@ -37,22 +38,31 @@ try {
       cursor = String(page[0]);
       for (const key of page[1]) {
         const [id, ttl] = await Promise.all([redis.get(key), redis.ttl(key)]);
-        if (typeof id === "string" && id.startsWith("guest:") && ttl > 0 && store.rememberGuest(key.slice("guest-session:".length), id, Date.now() + Math.min(ttl, 30 * 86400) * 1000)) sessions++;
+        if (typeof id === "string" && id.startsWith("guest:") && ttl > 0 && await store.rememberGuest(key.slice("guest-session:".length), id, Date.now() + Math.min(ttl, 30 * 86400) * 1000)) sessions++;
       }
     } while (cursor !== "0");
     const legacyNames = await redis.hgetall("users:usernames") || {};
     for (const [id, value] of Object.entries(legacyNames)) {
       if (!["string", "number", "boolean"].includes(typeof value)) continue;
       const name = String(value);
-      if (name.trim() && name.length <= 100 && !store.profile(id)) { store.saveProfile(id, name); profiles++; }
+      if (name.trim() && name.length <= 100 && !await store.profile(id)) { await store.saveProfile(id, name); profiles++; }
     }
     console.log(`Completed debate backfill: ${saved} archived or already saved, ${skipped} missing required records. Source records were preserved.`);
     console.log(`Preserved ${sessions} unexpired guest sessions as hashes and ${profiles} legacy names.`);
   } else if (command === "check") {
-    console.log("History integrity:", store.db.prepare("PRAGMA quick_check").get().quick_check);
-    console.log("Archived debates:", store.db.prepare("SELECT COUNT(*) AS count FROM history_matches").get().count);
+    if ("db" in store) {
+      console.log("History backend: SQLite");
+      console.log("History integrity:", store.db.prepare("PRAGMA quick_check").get().quick_check);
+      console.log("Archived debates:", store.db.prepare("SELECT COUNT(*) AS count FROM history_matches").get().count);
+    } else {
+      const { rows } = await store.pool.query("SELECT COUNT(*) AS count FROM ranked_debate.history_matches");
+      // Exercise every required relation without exposing any stored data.
+      for (const table of ["history_members", "profiles", "guest_sessions", "guest_claims"]) await store.pool.query(`SELECT 1 FROM ranked_debate.${table} LIMIT 0`);
+      console.log("History backend: PostgreSQL; schema reachable");
+      console.log("Archived debates:", rows[0].count);
+    }
   } else throw new Error("Use check, backup [new destination], or backfill");
 } catch (error) { console.error(error.message); process.exitCode = 1; }
-finally { store.close(); }
+finally { await store.close(); }
 // A TCP Redis connection from backfill otherwise keeps this short-lived CLI alive.
 process.exit(process.exitCode ?? 0);

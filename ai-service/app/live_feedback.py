@@ -8,7 +8,7 @@ from .model_client import MODEL, OLLAMA_URL
 from .live_schemas import LiveRequest, LiveExtraction, FactAssessments
 from .evidence import retrieve_sources
 
-LIVE_VERSION = "live-evidence-v1"
+LIVE_VERSION = "live-evidence-v2"
 
 
 async def structured(prompt: str, schema, *, limit=1600):
@@ -23,7 +23,10 @@ async def structured(prompt: str, schema, *, limit=1600):
             "options": {"temperature": 0, "num_predict": limit, "num_ctx": 8192},
         })
         response.raise_for_status()
-        return schema.model_validate_json(response.json()["message"]["content"])
+        data = response.json()
+        if not data.get("done") or data.get("done_reason") != "stop":
+            raise ValueError("Live model output did not finish normally")
+        return schema.model_validate_json(data["message"]["content"])
 
 
 def exact_quote(needle: str, text: str) -> str | None:
@@ -57,7 +60,11 @@ async def analyze_live(request: LiveRequest, *, model_call=None, retrieve=None) 
         "There are EXACTLY TWO speakers: A and B. Segment identifiers are not speaker names. Use the segment.side field for attribution. "
         "If a side has not spoken, say there is not enough material. Treat both sides symmetrically. Do not score ideology or verbosity. "
         "Do not declare factual assertions correct or incorrect from memory; factual checking happens separately using retrieved evidence. "
-        "Extract up to THREE important claims. Use kind fact only for externally checkable assertions, opinion for value judgments, and prediction for future outcomes. "
+        "Extract up to THREE important claims. Classify what the quoted sentence actually asserts before searching for evidence. "
+        "First decide whether the outcome has already occurred: an assertion that an event WILL happen is kind prediction, even if stated confidently or with a specific date. "
+        "Do not call a forecast a fact merely because it might be checked after the event. "
+        "A statement that a plan was announced is a fact about an announcement; a statement that the plan will succeed is a prediction about its outcome. "
+        "Use kind fact for externally checkable past/present assertions, opinion for value judgments, and prediction for future outcomes. "
         "A false or unsupported factual assertion is STILL kind fact. Lack of evidence never makes it an opinion. "
         "Examples: 'Mars has forty moons.' is fact (checkable even if wrong); 'Parks should be free.' is opinion; 'Taxes will fall next year.' is prediction. "
         "For each claim copy an EXACT short quote from its segment and use the exact segment_id provided. statement must contain ONE core assertion directly, "

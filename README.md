@@ -16,7 +16,7 @@ A local-first prototype that pairs people for a live, one-to-one video debate, s
 
 ## History and accounts
 
-Completed debates are archived to an ignored local SQLite database. Open `/history` to review your saved transcript, rubric scores, and checked sources. `/account` supports Supabase email/password sign-up/sign-in and explicit import of the current browser guest’s history. Imported records preserve the original speakers. Signing out removes access to account history.
+Completed debates are archived to local SQLite by default, or shared PostgreSQL when `HISTORY_DATABASE_URL` is configured. Open `/history` to review your saved transcript, rubric scores, and checked sources. `/account` supports Supabase email/password sign-up/sign-in and explicit import of the current browser guest’s history. Imported records preserve the original speakers. Signing out removes access to account history.
 
 Accounts require an active Supabase Auth project. This phase uses Supabase for authentication and SQLite for history; it does not require a Supabase database secret. Follow [the Step 5 setup, identity rules, backups, and test guide](docs/HISTORY_AND_ACCOUNTS.md).
 
@@ -50,7 +50,7 @@ The browser does not connect directly to Ollama or Redis. The Python service has
 | Build and validation | webpack, ESLint 9 with Next.js rules, TypeScript checking |
 | Node runtime | Node.js 22.18+; native TypeScript imports in the worker; CI uses Node 24 |
 | Live database and queues | Redis; atomic Lua scripts, lists, hashes, sorted sets, expiring leases |
-| Durable history | Node built-in SQLite, WAL transactions, participant ownership, online backups |
+| Durable history | Local SQLite or shared PostgreSQL (`pg`); immutable snapshots, participant ownership, explicit migration |
 | Redis clients | ioredis for TCP Redis; @upstash/redis through a shared command adapter or hosted REST |
 | Sessions | HTTP-only guest cookie with durable hashed credentials; verified Supabase account bearer sessions |
 | Realtime media | Browser WebRTC, getUserMedia, Google STUN; HTTP signalling/polling |
@@ -221,7 +221,7 @@ Quote validation proves that text was retrieved; it does not prove that the quot
 
 ## Storage and authorization
 
-Redis stores live coordination data and pending archive delivery. SQLite stores immutable completed debates, participant ownership, profiles, and hashed guest sessions. See [the Step 5 schema and backup guide](docs/HISTORY_AND_ACCOUNTS.md).
+Redis stores live coordination data and pending archive delivery. The selected SQL backend (SQLite or PostgreSQL) stores immutable completed debates, participant ownership, profiles, and hashed guest sessions. See [the Step 5 schema and backup guide](docs/HISTORY_AND_ACCOUNTS.md).
 
 | Key family | Data |
 | --- | --- |
@@ -283,6 +283,11 @@ FastAPI’s local `/docs` exposes request/response schemas. This service has no 
 
 ## Tests and model evaluation
 
+For local AI startup, recovery, and the accuracy workflow, see
+[AI operations](docs/AI_OPERATIONS.md). From the project root, `npm run ai:dev`
+starts Python and `npm run ai:check` reads its health/configuration; `npm run dev`
+separately runs the web app and judging worker.
+
 From the repository root, with test Redis running:
 
 ```bash
@@ -326,11 +331,11 @@ NODE_ENV=production npm run judge:worker
 
 Also manage Python/Uvicorn, Ollama, and Redis independently. Web instances and workers must share the same Redis and AI origins. Keep secrets server-side, configure Redis persistence/backups and retention, use HTTPS for browsers, and keep internal AI endpoints private. A production supervisor should restart failed services and allow in-flight work to finish during shutdown.
 
-The current SQLite archive requires persistent local storage shared by the web and worker processes on one host. Use a managed Node host/volume for this implementation. A shared SQL adapter is required before running these processes across separate hosts or Vercel serverless instances.
+The default SQLite archive requires persistent storage shared by web and worker on one host. For Vercel or separate hosts, configure the PostgreSQL adapter with `HISTORY_DATABASE_URL`, initialize its private schema, and migrate existing records before cutover. Vercel explicitly refuses SQLite fallback. Follow the [pilot deployment guide](docs/PILOT_DEPLOYMENT.md); real hosted migration and deployment verification remain pending.
 
 `vercel.json` configures the Next.js build only. Deploying that directory to Vercel does not provide the Python service, Ollama weights/hardware, Redis, or a persistent Node worker. GitHub stores source; pushing to GitHub does not by itself provision these services. This application cannot work as a static GitHub Pages export.
 
-WebRTC currently uses Google STUN and has **no TURN relay**. Local testing does not establish connectivity across restrictive real-world networks. Add TURN, validate AI throughput/queue delay, and implement production account/history controls before a broad launch. Queue tests with 10 or 101 synthetic users establish pairing behavior, not equivalent AI/video capacity.
+WebRTC defaults to Google STUN and supports optional coturn-compatible TURN credentials through an active-room participant endpoint. No relay is provisioned by this repository. See [the invite-only pilot checklist](docs/PILOT_DEPLOYMENT.md) for TURN setup, Vercel storage/worker prerequisites, and Supabase recovery. Cross-network relay testing, AI throughput/queue-delay measurements, and production account/history controls remain open. Queue tests with 10 or 101 synthetic users establish pairing behavior, not equivalent AI/video capacity.
 
 ## Troubleshooting
 
@@ -339,7 +344,7 @@ WebRTC currently uses Google STUN and has **no TURN relay**. Local testing does 
 | Two windows never pair | Use regular + incognito/guest contexts, same hostname, a shared topic, and the same Redis backend; ensure Save succeeds |
 | Name does not survive refresh | Check SQLite path/permissions, cookie acceptance, hostname consistency, and `/api/profile` response |
 | Camera/mic unavailable | Allow permissions; use localhost or HTTPS; review browser device ownership |
-| Video connects locally but not remotely | Restrictive networks may require the not-yet-configured TURN relay |
+| Video connects locally but not remotely | Configure TURN and verify relay-only connectivity across separate networks; see the pilot checklist |
 | Transcript unavailable | Check Python, model warm-up, `/transcription/health`, mic permissions, and pending outbox; text contributions remain available |
 | Result stays pending | Check the Node worker, Python `/health`, Ollama `/api/tags`, and shared Redis; exhausted jobs expose retry |
 | AI is slow | Weights may be loading; speech and model inference consume local resources; one worker processes one job at a time |

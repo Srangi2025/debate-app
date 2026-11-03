@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, existsSync, chmodSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type { TranscriptSegment } from "./transcript.ts";
+import { PostgresHistoryStore } from "./postgres-history.ts";
 
 export type ArchivedMatch = {
   match: {
@@ -121,7 +122,18 @@ export class HistoryStore {
   close() { this.db.close(); }
 }
 
-export function historyStore(): HistoryStore {
+export type DurableHistory = HistoryStore | PostgresHistoryStore;
+
+export function historyStore(): DurableHistory {
+  const url = process.env.HISTORY_DATABASE_URL;
+  const remote = globalThis as typeof globalThis & { debatePostgresStores?: Map<string, PostgresHistoryStore> };
+  if (url) {
+    const stores = remote.debatePostgresStores ??= new Map();
+    let store = stores.get(url);
+    if (!store) { store = new PostgresHistoryStore(url); stores.set(url, store); }
+    return store;
+  }
+  if (process.env.VERCEL) throw new Error("Set HISTORY_DATABASE_URL: Vercel requires shared durable storage");
   const path = resolve(process.env.HISTORY_DB_PATH || "data/debate-history.sqlite");
   const shared = globalThis as typeof globalThis & { debateHistoryStores?: Map<string, HistoryStore> };
   const stores = shared.debateHistoryStores ??= new Map();

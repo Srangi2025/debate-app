@@ -10,6 +10,13 @@ Qwen’s [model card](https://huggingface.co/Qwen/Qwen3.5-4B) describes the upst
 
 ## Measured baseline: 2026-10-25
 
+November 3 recovery and regression results are recorded in
+[AI operations](AI_OPERATIONS.md). The restored v2 final judge passed three
+synthetic winner cases and speaker swaps. Live v1 still misclassified the
+prediction; the revised live v2 prompt passed the unchanged five-case smoke set
+plus seven new synthetic evidence/temporal challenges (12/12 combined). This
+prompt-informed regression run is not an independent held-out human benchmark.
+
 A real local-model run of the original v1 judge used the committed synthetic smoke fixtures (these are historical results, not a benchmark of the new v2 final judge):
 
 | Measurement | Observed result | Scope |

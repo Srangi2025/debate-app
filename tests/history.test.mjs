@@ -133,9 +133,9 @@ test("history, profile, and guest identity survive process-style reopen and a ve
   const path = join(dir, "history.sqlite"), backup = join(dir, "backup.sqlite");
   let store = new HistoryStore(path); const saved = snapshot(); store.save(saved); store.saveProfile("guest:a", "Persistent"); store.rememberGuest("cookie", "guest:a", Date.now() + 100000); store.close();
   store = new HistoryStore(path); assert.deepEqual(store.get("guest:a", saved.match.id), saved); assert.equal(store.profile("guest:a"), "Persistent"); assert.equal(store.guest("cookie"), "guest:a"); store.close();
-  const run = spawnSync(process.execPath, ["scripts/history-db.mjs", "backup", backup], { env: { ...process.env, HISTORY_DB_PATH: path }, encoding: "utf8" });
+  const run = spawnSync(process.execPath, ["scripts/history-db.mjs", "backup", backup], { env: { ...process.env, HISTORY_DATABASE_URL: "", VERCEL: "", HISTORY_DB_PATH: path }, encoding: "utf8" });
   assert.equal(run.status, 0, run.stderr);
   const restored = new HistoryStore(backup); assert.deepEqual(restored.get("guest:a", saved.match.id), saved); restored.close();
-  const repeat = spawnSync(process.execPath, ["scripts/history-db.mjs", "backup", backup], { env: { ...process.env, HISTORY_DB_PATH: path }, encoding: "utf8" });
+  const repeat = spawnSync(process.execPath, ["scripts/history-db.mjs", "backup", backup], { env: { ...process.env, HISTORY_DATABASE_URL: "", VERCEL: "", HISTORY_DB_PATH: path }, encoding: "utf8" });
   assert.equal(repeat.status, 1, "Existing backups must not be overwritten");
 });

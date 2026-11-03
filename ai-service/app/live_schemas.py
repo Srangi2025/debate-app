@@ -25,7 +25,7 @@ class ExtractedClaim(BaseModel):
     segment_id: str = Field(min_length=1, max_length=100)
     quote: str = Field(min_length=1, max_length=350)
     statement: str = Field(min_length=10, max_length=400, description="The full standalone assertion in a sentence. Never a classification label such as 'opinion' or 'irrelevant'.")
-    kind: Literal["fact", "opinion", "prediction"] = Field(description="fact means checkable, even if FALSE or unsupported. opinion means a preference/value judgment. prediction means a future outcome.")
+    kind: Literal["fact", "opinion", "prediction"] = Field(description="prediction: the quoted outcome has not yet happened, including confident 'will' assertions. fact: a checkable past/present assertion, even if FALSE or unsupported. opinion: a preference/value judgment. A past announcement is a fact; future fulfillment is a prediction.")
     query: str = Field(max_length=160, description="Neutral subject keywords for retrieving evidence about a fact. Empty for opinions or predictions.")
 
 

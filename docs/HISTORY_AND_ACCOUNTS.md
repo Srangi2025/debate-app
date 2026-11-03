@@ -204,13 +204,14 @@ and configuration are not rewritten by the test run. Outputs
 are ignored under `data/e2e-artifacts`. `E2E_PORT`, `E2E_AI_URL`, and
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` can adjust local test services/browser selection.
 
-Live replacement-project reachability, confirmation delivery, and a real account
-login must still be verified after its settings are provided. Do not describe a
-local auth-fixture pass as a successful live Supabase rollout.
+November 3 update: the existing Supabase project was restored; live Auth health
+and settings return HTTP 200. The owner confirmed real signup/sign-in and the
+guest-import UI. Email auto-confirm is currently enabled, so confirmation-email
+delivery remains untested. Production account/history checks remain open.
 
-The October 26, 2026 live check could not resolve the configured Supabase Auth
-hostname (`ENOTFOUND`). Cloud Redis passed its connection check. Correct the
-Supabase project URL and matching publishable key before testing real accounts.
+The October 26 DNS failure was resolved by restoring the existing project;
+the original configured URL/publishable key work. Cloud Redis previously passed
+its connection check.
 
 The local browser integration also checks that signed-in accounts can pair and
 save contributions using their verified account IDs.
@@ -220,3 +221,18 @@ WebRTC connection, text fallback, transcript reload, live feedback, final ground
 judging, SQL archival, explicit account import, forged-token/ID rejection, active
 room guards, logout privacy, confirmation/sign-in, Redis loss, and process restart.
 Auth provider calls used the isolated fixture; no replacement live project was used.
+
+## Shared PostgreSQL storage
+
+`HISTORY_DATABASE_URL` selects the new server-only PostgreSQL adapter. With no
+URI, local development retains SQLite; Vercel refuses SQLite rather than writing
+ephemeral account/history records. All web processes and the judging worker must
+use the same backend during cutover. The `ranked_debate` schema is backend-only;
+browser roles receive no access. Server routes still verify identity and filter
+all history reads by owner.
+
+See [pilot deployment and migration](PILOT_DEPLOYMENT.md) for setup and cutover.
+Postgres tests require `HISTORY_PG_TEST_URL` pointing at a **dedicated disposable
+database whose name ends in `_test`**; the suite truncates its own schema. CI
+provides an isolated PostgreSQL service. Without this variable, Postgres tests
+are explicitly skipped; the local SQLite suite still runs.

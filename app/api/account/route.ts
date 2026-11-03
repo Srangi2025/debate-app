@@ -18,7 +18,7 @@ export async function GET(req: Request) {
     const ownActivity = await activity(auth.userId);
     return NextResponse.json({ kind: auth.kind, email: auth.email, userId: auth.userId, activity: ownActivity,
       guest: guest && auth.kind === "account" ? {
-        available: true, username: historyStore().profile(guest) ?? await redis.hget("users:usernames", guest),
+        available: true, username: await historyStore().profile(guest) ?? await redis.hget("users:usernames", guest),
         activity: await activity(guest),
       } : null });
   } catch {
