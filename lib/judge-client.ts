@@ -1,3 +1,4 @@
+import { aiServiceHeaders } from "./ai-transport.ts";
 
 export type FinalSourceCheck = {
   id: string; side: "A" | "B"; quote: string;
@@ -55,6 +56,7 @@ export async function evaluateDebate(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...aiServiceHeaders(AI_JUDGE_URL),
     },
     body: JSON.stringify({
       topic,
@@ -63,6 +65,7 @@ export async function evaluateDebate(
     }),
     signal: AbortSignal.any([AbortSignal.timeout(620000), ...(signal ? [signal] : [])]),
     cache: "no-store",
+    redirect: "error",
   });
 
   if (!response.ok) {

@@ -1,6 +1,8 @@
 import os
+import secrets
 import httpx
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException, UploadFile, Request
+from starlette.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 from pydantic import ValidationError
 from .schemas import DebateRequest, DebateResult, EloPreview, EloPreviewRequest
@@ -11,6 +13,19 @@ from .live_schemas import LiveRequest
 from .live_feedback import analyze_live, LIVE_VERSION
 
 app = FastAPI(title="Debate AI Judge", version="0.3.0")
+
+@app.middleware("http")
+async def authenticate_service(request: Request, call_next):
+    token = os.environ.get("AI_SERVICE_TOKEN", "")
+    if not token and os.environ.get("AI_REQUIRE_AUTH", "").lower() == "true":
+        return JSONResponse({"detail": "Service authentication is not configured"}, status_code=503)
+    if token and not secrets.compare_digest(
+        request.headers.get("authorization", "").encode(), f"Bearer {token}".encode()
+    ):
+        return JSONResponse({"detail": "Unauthorized"}, status_code=401,
+                            headers={"WWW-Authenticate": "Bearer"})
+    return await call_next(request)
+
 
 @app.post("/live-feedback")
 async def live_feedback(request: LiveRequest):

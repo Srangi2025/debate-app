@@ -197,7 +197,41 @@ lint, TypeScript, and the production build. Live post-cutover session, profile,
 history, and account routes returned HTTP 200. This does not establish hosted capacity.
 See [the pilot deployment checklist](PILOT_DEPLOYMENT.md).
 
+November 6, 2026 continuation: repository assessment still places the project in
+Step 6, before pilot release. Added server-to-server bearer authentication for
+judging, live feedback, transcription, and authenticated health probes. Remote
+Node clients require HTTPS/token and reject redirects; Python can fail closed
+with `AI_REQUIRE_AUTH=true`. Validation: 75 Node tests passed, ten PostgreSQL
+integration cases skipped without a dedicated test database; 45 Python tests,
+lint, TypeScript, production build, and diff checks passed. No hosting, TURN, invitation enforcement, capacity
+claim, or independent human model benchmark is completed by this increment.
+
+November 13, 2026 continuation: added an optional server-side permanent-account
+allowlist for the invite-only pilot. Protected APIs check Supabase-verified IDs;
+session/account status remain available for sign-in. Empty lists deny access and
+invalid modes fail closed. Local default remains open; the deployed pilot must
+explicitly enable the gate. Verified 78 Node tests, lint, production build, and
+production HTTP checks of twelve protected endpoints plus sign-in/session access.
+Ten PostgreSQL tests were skipped without a dedicated test database. Hosted
+invited-account verification, worker/AI hosting, TURN connectivity, capacity,
+backups/monitoring, and release remain pending. Existing AI-authentication work
+is preserved; this increment is uncommitted.
+
 ## GitHub checkpoints
+
+November 14, 2026: owner requires a zero-dollar hosting budget and authorized
+committing/pushing the current changes. Existing Git credentials support the
+repository push; Vercel CLI is authenticated and the checkout is linked to the
+existing Hobby project. Verified preliminary pages at
+https://debate-app-gamma.vercel.app, but session creation fails. The configured
+Supabase project currently returns NXDOMAIN and the SQL pooler cannot find its
+tenant; restoration/checking in the owner dashboard is required. Redis responds.
+No claim of a working hosted debate or healthy Supabase is supported by these
+checks. Free hosting recommendations are recorded in [FREE_HOSTING.md](FREE_HOSTING.md).
+All 45 Python tests pass; prior validation of this code passed 78 Node tests,
+lint, and production build, with ten PostgreSQL tests skipped. Production secret
+downloads were rejected by automatic approval review; only environment metadata
+and live endpoints were inspected.
 
 During active work, prepare a working checkpoint about every 30 minutes and at
 completed phase boundaries. State the current phase, validation results, scope,

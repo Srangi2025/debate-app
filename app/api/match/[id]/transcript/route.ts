@@ -1,3 +1,4 @@
+import { aiServiceHeaders } from "@/lib/ai-transport";
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { authenticate, authorizeMatch } from "@/lib/server-auth";
@@ -64,7 +65,7 @@ export async function POST(req: Request, context: Context) {
       const payload = new FormData();
       payload.append("audio", audio, "speech.wav");
       const response = await fetch(`${service.replace(/\/+$/, "")}/transcribe`, {
-        method: "POST", body: payload, signal: AbortSignal.timeout(45000), cache: "no-store",
+        method: "POST", headers: aiServiceHeaders(service, process.env.TRANSCRIPTION_SERVICE_TOKEN || process.env.AI_SERVICE_TOKEN), redirect: "error", body: payload, signal: AbortSignal.timeout(45000), cache: "no-store",
       });
       if (response.status === 400 || response.status === 413) return NextResponse.json({ error: "This audio clip could not be read. Discard the unsaved clip and add your contribution as text." }, { status: 400 });
       if (!response.ok) return NextResponse.json({ error: "Speech capture is temporarily unavailable. Your clip is saved locally and will retry." }, { status: 503 });

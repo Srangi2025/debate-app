@@ -1,3 +1,4 @@
+import { aiServiceHeaders } from "./ai-transport.ts";
 import { randomUUID } from "node:crypto";
 import type { Redis } from "@upstash/redis";
 import { CLAIM_LIVE_SCRIPT, LIVE_FEEDBACK_QUEUE, LIVE_LEASE_MS, PUBLISH_LIVE_SCRIPT, validLiveSnapshot, type LiveSnapshot } from "./live-feedback.ts";
@@ -12,7 +13,7 @@ async function analyze(input: Input) {
   const service = process.env.AI_JUDGE_URL;
   if (!service) throw new Error("AI_JUDGE_URL is not configured");
   const response = await fetch(`${service.replace(/\/+$/, "")}/live-feedback`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+    method: "POST", redirect: "error", headers: { "Content-Type": "application/json", ...aiServiceHeaders(service) }, body: JSON.stringify(input),
     signal: AbortSignal.timeout(80000),
   });
   if (!response.ok) throw new Error(`Live feedback service returned HTTP ${response.status}`);

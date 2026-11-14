@@ -6,7 +6,7 @@ import { redis } from "@/lib/redis";
 
 export async function GET(req: Request) {
   try {
-    const auth = await authenticate(req);
+    const auth = await authenticate(req, { allowUninvited: true });
     if (auth.response) return auth.response;
     const credential = (await cookies()).get("debate-guest")?.value;
     const guest = await currentGuest(credential);

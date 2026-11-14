@@ -24,7 +24,10 @@ November 3 recovery verified: existing Ollama model on GPU, real judging/swap
 inference, successful HTTP speech recognition of a generated WAV clip, live
 Wikipedia retrieval (three sources), and worker heartbeat. Local AI restart does
 not provision an always-on backend for Vercel. The Python API remains loopback-only
-and has no public authentication; external hosting/access controls remain Step 6.
+and was not externally hosted. Server-to-server bearer authentication has since
+been implemented; set `AI_REQUIRE_AUTH=true` and `AI_SERVICE_TOKEN` before any
+remote exposure. External hosting remains Step 6. See the
+[zero-budget hosting options](FREE_HOSTING.md).
 
 ## Evaluate before claiming quality improvements
 

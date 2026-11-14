@@ -89,8 +89,16 @@ References: [Postgres connections](https://supabase.com/docs/guides/database/con
 
 ### Vercel release
 
-The CLI currently reports **Logged out**. Run `npx vercel login`, then
-`npx vercel link` to select the existing project. Set database URI/CA, Supabase
+November 14 verification found an existing Hobby deployment at
+https://debate-app-gamma.vercel.app and authenticated Vercel CLI access. This
+checkout is linked to `srangi2025s-projects/debate-app`. The homepage, account,
+and dashboard load; session creation currently fails while the configured
+Supabase project's hostname and SQL tenant are unavailable. Restore the project
+and recheck auth, SQL, and session creation before claiming operational readiness.
+See [free hosting options and current checks](FREE_HOSTING.md).
+
+For an unlinked checkout, run `npx vercel login`, then `npx vercel link` to select
+the existing project. Set database URI/CA, Supabase
 public URL/key, shared Redis, and reachable authenticated AI service settings
 in the intended Vercel environment before `npx vercel --prod`. Public variables
 are embedded at build time, so redeploy after changing them. Use `npm ci` to
@@ -98,8 +106,16 @@ install the reviewed lockfile. Do not create an unrelated temporary deployment.
 
 The judging worker requires an external managed process; Python/Ollama also need
 an appropriate external host. Select hosting and budget before provisioning.
-The AI service currently trusts its private network: do not expose it publicly
-to connect Vercel without adding authenticated transport/access controls. Web and
+The AI service now supports bearer authentication on all HTTP endpoints.
+Before connecting Vercel, set `AI_REQUIRE_AUTH=true` and a cryptographically
+random `AI_SERVICE_TOKEN` on Python; configure the same token on web and worker.
+Use an HTTPS reverse proxy and keep Ollama private. A missing token with required
+auth returns 503; incorrect or absent credentials return 401 before inference.
+Health probes must send the bearer token too. Node clients require HTTPS and a
+token for all non-loopback destinations and reject redirects. For separate speech
+hosting, set `TRANSCRIPTION_SERVICE_TOKEN` to that service’s token. Local loopback
+development remains usable without tokens. These controls are implemented and
+tested locally; no external endpoint has been provisioned or verified. Web and
 worker must share Redis and the durable SQL backend. Worker/AI hosting is still
 an open choice; frontend publication alone does not make judging operational.
 
@@ -136,6 +152,35 @@ would require credential refresh. A real relay and these network checks remain o
 
 ## Pilot release gates
 
+### Invitation access
+
+Set `PILOT_ACCESS_MODE=invite-only` on the web deployment, with
+`PILOT_ACCOUNT_IDS` containing comma-separated Supabase Auth user UUIDs selected
+by the owner. These are server-only settings. Obtain IDs from Supabase's Auth
+user list; do not use email addresses, guest IDs, or browser-provided IDs.
+An empty list closes participation to everyone; an unrecognized mode returns
+503. Omitted mode (or `open`) preserves local guest access. Explicitly configure
+the mode before pilot publication; the default is not invite-only.
+
+The shared server authentication check verifies bearer tokens with Supabase
+before checking permanent account IDs. Guests, anonymous Supabase accounts,
+and unlisted accounts receive 403 on protected APIs, including queue, media
+signalling, transcripts, judging, profiles, and history. Session initialization
+and account status remain accessible so people can sign in or switch accounts.
+Public pages and Supabase signup remain available; creating an account does not
+grant participation. This gate does not restrict direct Supabase signup or
+replace infrastructure rate limits. Removing an ID revokes subsequent protected
+requests after the environment change is deployed. Finish ongoing debates before
+changing the list: removal also blocks further room actions and history access.
+
+November 13 local verification: 78 Node tests passed, ten PostgreSQL cases
+skipped without a dedicated test database; lint and the production build passed.
+Production-server HTTP checks rejected uninvited requests on twelve protected
+endpoints, including a valid guest cookie, while keeping session/account/sign-in
+access available. The pure policy tests cover invited IDs, anonymous accounts,
+revocation, empty lists, and invalid modes. An invited real-account hosted flow
+still needs verification after deployment. No deployed allowlist was changed.
+
 - Real Supabase account flow and production SQL ownership/privacy checks pass.
 - TURN works across separate networks; media-permission failures have usable fallback.
 - Managed worker/AI restart and archive retry survive interruption.
@@ -144,5 +189,6 @@ would require credential refresh. A real relay and these network checks remain o
 - Enforce invitation access server-side before describing the deployment as invite-only.
 - Configure HTTPS, backups with restore checks, and operational monitoring.
 
-No public capacity claim, invite gate, or external deployment is implemented by
-the initial TURN increment. Commit/push remains subject to the owner's checkpoint approval.
+No public capacity claim or external deployment is complete. The invitation gate
+is implemented locally and must be configured and verified on the pilot host.
+Commit/push remains subject to the owner's checkpoint approval.

@@ -5,14 +5,27 @@ import { randomUUID } from "node:crypto";
 import { redis } from "@/lib/redis";
 import { historyStore } from "./history-store";
 import { resolveGuestCredential } from "./guest-sessions";
+import { pilotAccess } from "./pilot-access";
 
 export async function currentGuest(credential: string | undefined): Promise<string | null> {
   return resolveGuestCredential(credential, historyStore(), redis);
 }
 
-export async function authenticate(req: Request) {
+type Authentication =
+  | { response: NextResponse; userId?: never; kind?: never; email?: never }
+  | { response?: never; userId: string; kind: "guest" | "account"; email: string | null };
+
+export async function authenticate(req: Request, options: { allowUninvited?: boolean } = {}): Promise<Authentication> {
+  const denied = (identity: { userId: string; kind: "guest" | "account" } | null) => {
+    const failure = options.allowUninvited ? null : pilotAccess(identity);
+    return failure ? { response: NextResponse.json({ error: failure.error }, {
+      status: failure.status, headers: { "Cache-Control": "private, no-store" },
+    }) } : null;
+  };
   const token = req.headers.get("authorization")?.match(/^Bearer (\S+)$/i)?.[1];
   if (!token) {
+    const failure = denied(null);
+    if (failure) return failure;
     const store = await cookies();
     const credential = store.get("debate-guest")?.value;
     const existing = await currentGuest(credential);
@@ -34,7 +47,10 @@ export async function authenticate(req: Request) {
   // Verify with Supabase; never trust a browser-supplied ID or decoded JWT alone.
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data.user) return { response: NextResponse.json({ error: "Invalid or expired account session" }, { status: 401 }) };
-  return { userId: data.user.id, kind: data.user.is_anonymous ? "guest" as const : "account" as const, email: data.user.email ?? null };
+  const identity = { userId: data.user.id, kind: data.user.is_anonymous ? "guest" as const : "account" as const, email: data.user.email ?? null };
+  const failure = denied(identity);
+  if (failure) return failure;
+  return identity;
 }
 
 export type MatchRecord = {
